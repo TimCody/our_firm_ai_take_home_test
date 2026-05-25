@@ -1,0 +1,10 @@
+services:
+  app:
+    build: .
+    ports:
+      - "3001:3001"
+    environment:
+      - PORT=3001
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - MAX_UPLOAD_BYTES=${MAX_UPLOAD_BYTES:-26214400}
+    restart: unless-stopped

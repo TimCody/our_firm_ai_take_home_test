@@ -1,0 +1,215 @@
+{
+  "generatedAt": "2026-05-25T13:55:29.578Z",
+  "fixtures": [
+    {
+      "file": "easy/01-clean-letter.pdf",
+      "tier": "easy",
+      "description": "Single-page formal letter; clear letterhead, footer, italic-name signature",
+      "expectations": {
+        "letterhead": true,
+        "footer": true,
+        "signature": true
+      }
+    },
+    {
+      "file": "easy/02-centered-letterhead.pdf",
+      "tier": "easy",
+      "description": "Centered letterhead, handwritten-style signature scribble, footer with page number",
+      "expectations": {
+        "letterhead": true,
+        "footer": true,
+        "signature": true
+      }
+    },
+    {
+      "file": "easy/03-corporate-memo.pdf",
+      "tier": "easy",
+      "description": "Memo style: bold letterhead, simple footer, italic signature",
+      "expectations": {
+        "letterhead": true,
+        "footer": true,
+        "signature": true
+      }
+    },
+    {
+      "file": "easy/04-firm-letterhead.pdf",
+      "tier": "easy",
+      "description": "Law-firm style with name partner list, classic sign-off",
+      "expectations": {
+        "letterhead": true,
+        "footer": true,
+        "signature": true
+      }
+    },
+    {
+      "file": "easy/05-thank-you.pdf",
+      "tier": "easy",
+      "description": "Short thank-you letter, casual sign-off",
+      "expectations": {
+        "letterhead": true,
+        "footer": true,
+        "signature": true
+      }
+    },
+    {
+      "file": "easy/06-engagement-letter.pdf",
+      "tier": "easy",
+      "description": "Multi-paragraph engagement letter with explicit signature line",
+      "expectations": {
+        "letterhead": true,
+        "footer": true,
+        "signature": true
+      }
+    },
+    {
+      "file": "easy/07-multipage-letter.pdf",
+      "tier": "easy",
+      "description": "Two-page letter; footer repeats on each page",
+      "expectations": {
+        "letterhead": true,
+        "footer": true,
+        "signature": true
+      }
+    },
+    {
+      "file": "easy/08-bold-header.pdf",
+      "tier": "easy",
+      "description": "Big bold header band — classic letterhead",
+      "expectations": {
+        "letterhead": true,
+        "footer": true,
+        "signature": true
+      }
+    },
+    {
+      "file": "easy/09-cover-letter.pdf",
+      "tier": "easy",
+      "description": "Personal cover letter (no company brand, just name/address as letterhead)",
+      "expectations": {
+        "letterhead": true,
+        "footer": false,
+        "signature": true
+      }
+    },
+    {
+      "file": "easy/10-classic-letter.pdf",
+      "tier": "easy",
+      "description": "Classic business letter, all three regions present and clean",
+      "expectations": {
+        "letterhead": true,
+        "footer": true,
+        "signature": true
+      }
+    },
+    {
+      "file": "medium/01-no-signature.pdf",
+      "tier": "medium",
+      "description": "Letterhead + footer, no signature — tests \"not detected\" path",
+      "expectations": {
+        "letterhead": true,
+        "footer": true,
+        "signature": false
+      }
+    },
+    {
+      "file": "medium/02-no-letterhead.pdf",
+      "tier": "medium",
+      "description": "Body-only document with signature and footer but no letterhead",
+      "expectations": {
+        "letterhead": false,
+        "footer": true,
+        "signature": true
+      }
+    },
+    {
+      "file": "medium/03-small-font.pdf",
+      "tier": "medium",
+      "description": "Tiny body font, dense paragraphs — tests robustness to dense layouts",
+      "expectations": {
+        "letterhead": true,
+        "footer": true,
+        "signature": true
+      }
+    },
+    {
+      "file": "medium/04-rotated-text.pdf",
+      "tier": "medium",
+      "description": "Side watermark + body text — letterhead and footer at normal positions",
+      "expectations": {
+        "letterhead": true,
+        "footer": true,
+        "signature": true
+      }
+    },
+    {
+      "file": "medium/05-three-pages.pdf",
+      "tier": "medium",
+      "description": "Three-page document — signature only on last page, footer on every page",
+      "expectations": {
+        "letterhead": true,
+        "footer": true,
+        "signature": true
+      }
+    },
+    {
+      "file": "medium/06-low-contrast.pdf",
+      "tier": "medium",
+      "description": "Light-grey signature stroke — tests ink-density threshold",
+      "expectations": {
+        "letterhead": true,
+        "footer": true,
+        "signature": true
+      }
+    },
+    {
+      "file": "hard/01-poster-style.pdf",
+      "tier": "hard",
+      "description": "Poster/flyer with title-as-letterhead, no signature, no clear footer",
+      "expectations": {
+        "letterhead": true,
+        "footer": false,
+        "signature": false
+      }
+    },
+    {
+      "file": "hard/02-jumbled-layout.pdf",
+      "tier": "hard",
+      "description": "Three-column ish layout, footer-positioned legal text mid-page — adversarial",
+      "expectations": {
+        "letterhead": true,
+        "footer": true,
+        "signature": true
+      }
+    },
+    {
+      "file": "images/letter-photo.png",
+      "tier": "image",
+      "description": "PNG image of a letter — exercises image-input pipeline",
+      "expectations": {
+        "letterhead": true,
+        "footer": true,
+        "signature": false
+      }
+    },
+    {
+      "file": "images/letter-photo.jpg",
+      "tier": "image",
+      "description": "JPEG version of the letter — same content, lossy compression",
+      "expectations": {
+        "letterhead": true,
+        "footer": true,
+        "signature": false
+      }
+    },
+    {
+      "file": "docx/engagement-letter.docx",
+      "tier": "docx",
+      "description": "DOCX with header, footer, and italic sign-off name",
+      "expectations": {
+        "letterhead": true,
+        "footer": true,
+        "signature": false
+      }
+    }
+  ]
+}

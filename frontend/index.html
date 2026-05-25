@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Document Region Extractor</title>
+    <link rel="stylesheet" href="/src/styles.css" />
+  </head>
+  <body>
+    <div id="app-shell">
+      <!-- =================== SIDEBAR =================== -->
+      <aside id="sidebar">
+        <header class="sidebar-header">
+          <h1>Document Region Extractor</h1>
+          <p class="tagline">Letterhead · Footer · Signature</p>
+        </header>
+
+        <section class="sidebar-section">
+          <h2>Deployment scenario</h2>
+          <p class="hint">
+            Pick a scale. Each preset bundles deadline, throughput, user
+            count, and the recommended confidence threshold. See the
+            architecture sketch at the bottom of the page.
+          </p>
+          <div id="preset-list" class="preset-list" role="radiogroup" aria-label="Scenario"></div>
+          <div id="preset-detail" class="preset-detail"></div>
+        </section>
+
+        <section class="sidebar-section">
+          <h2>Impact</h2>
+          <p id="hitl-impact" class="dial-impact">Upload documents to see how many would route to human review.</p>
+        </section>
+
+        <section class="sidebar-section">
+          <h2>Backend</h2>
+          <p id="health-indicator" class="dial-meaning">checking…</p>
+        </section>
+      </aside>
+
+      <!-- =================== MAIN =================== -->
+      <main id="main">
+        <section id="upload-section">
+          <div class="dropzone" id="dropzone" role="button" tabindex="0" aria-label="Upload documents">
+            <input
+              type="file"
+              id="file-input"
+              accept="application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,image/png,image/jpeg"
+              hidden
+              multiple
+            />
+            <div class="dropzone-prompt">
+              <strong>Drop one or more files here</strong> or click to choose
+              <span class="hint">PDF · DOCX · PNG · JPEG · up to 25&nbsp;MB each</span>
+            </div>
+          </div>
+        </section>
+
+        <section id="gallery-section" hidden>
+          <header class="gallery-header">
+            <button id="prev-btn" class="nav-btn" aria-label="Previous document">‹</button>
+            <div class="gallery-meta">
+              <strong id="active-filename"></strong>
+              <span id="active-position"></span>
+            </div>
+            <button id="next-btn" class="nav-btn" aria-label="Next document">›</button>
+          </header>
+
+          <nav id="gallery-strip" aria-label="Document thumbnails"></nav>
+
+          <div class="result-grid">
+            <div class="preview-pane">
+              <h2>Preview</h2>
+              <div id="preview-container"></div>
+            </div>
+            <div class="regions-pane">
+              <h2>Extracted regions</h2>
+              <div id="regions-container"></div>
+              <div id="ai-panel" class="ai-panel-wrap" hidden></div>
+              <div id="meta" class="meta"></div>
+            </div>
+          </div>
+        </section>
+
+        <section id="architecture-section" class="arch-section" hidden>
+          <header class="arch-header">
+            <h2>Proposed architecture</h2>
+            <p class="arch-subtitle">
+              for the <strong id="arch-title"></strong> scenario
+            </p>
+          </header>
+          <pre id="arch-diagram" class="arch-diagram"></pre>
+          <h3 class="arch-notes-heading">Why this fits</h3>
+          <ul id="arch-notes" class="arch-notes"></ul>
+        </section>
+      </main>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
