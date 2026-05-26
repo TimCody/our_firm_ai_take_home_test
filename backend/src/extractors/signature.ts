@@ -102,32 +102,44 @@ async function materializeCandidate(
 }
 
 /**
- * Strategy A: look for sign-off tokens ("Sincerely,", "Regards,", etc.) in
- * the bottom half. When found, crop from that line down by ~180px.
+ * Strategy A: look for sign-off tokens ("Sincerely,", "Regards,", etc.).
+ *
+ * Originally we restricted this to the bottom 50% of the page, but short
+ * letters often have the sign-off in the upper-middle (when there's only
+ * one or two body paragraphs). So we now search the WHOLE page and pick
+ * the LAST occurrence — sign-offs are by convention near the end of a
+ * letter, so the latest match wins.
+ *
+ * Body-text false-positives are avoided by a line-length filter: a real
+ * sign-off line is short ("Sincerely," is 10 chars; "Best regards," is 13).
+ * Body sentences containing words like "sincerely" run far longer.
  */
+const MAX_SIGN_OFF_LINE_LENGTH = 30;
+
 export function findBySignOffToken(page: PageRender): Candidate | null {
   const { textItems, width, height } = page;
-  const bottomHalfStart = height * 0.5;
-  const lines = groupIntoLines(
-    textItems.filter((t) => t.y >= bottomHalfStart),
-  );
+  const lines = groupIntoLines(textItems);
 
+  let lastMatch: { line: ReturnType<typeof groupIntoLines>[number]; token: string } | null = null;
   for (const line of lines) {
-    const text = lineText(line).toLowerCase();
-    const token = SIGN_OFF_TOKENS.find((t) => text.includes(t));
-    if (!token) continue;
-
-    const top = Math.max(0, line.y - 4);
-    const bottom = Math.min(height, line.y + line.height + 180);
-    return {
-      box: { x: 0, y: top, width, height: bottom - top },
-      confidence: 0.78,
-      rationale: `Found sign-off token "${token}" on a line ${Math.round(
-        (line.y / height) * 100,
-      )}% down the page.`,
-    };
+    const text = lineText(line);
+    if (text.length > MAX_SIGN_OFF_LINE_LENGTH) continue;
+    const lower = text.toLowerCase();
+    const token = SIGN_OFF_TOKENS.find((t) => lower.includes(t));
+    if (token) lastMatch = { line, token };
   }
-  return null;
+  if (!lastMatch) return null;
+
+  const { line, token } = lastMatch;
+  const top = Math.max(0, line.y - 4);
+  const bottom = Math.min(height, line.y + line.height + 180);
+  return {
+    box: { x: 0, y: top, width, height: bottom - top },
+    confidence: 0.78,
+    rationale: `Found sign-off token "${token}" on a line ${Math.round(
+      (line.y / height) * 100,
+    )}% down the page.`,
+  };
 }
 
 /**

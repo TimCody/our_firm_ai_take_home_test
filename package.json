@@ -8,6 +8,7 @@
     "backend"
   ],
   "scripts": {
+    "predev": "node scripts/predev.mjs",
     "dev": "concurrently -n backend,frontend -c blue,green \"npm:dev --workspace=backend\" \"npm:dev --workspace=frontend\"",
     "build": "npm run build --workspace=backend && npm run build --workspace=frontend",
     "start": "npm run start --workspace=backend",

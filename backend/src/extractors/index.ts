@@ -36,6 +36,9 @@ export async function extractDocument(
   mimeType: string,
   options: ExtractOptions = {},
 ): Promise<ExtractionResult> {
+  if (buffer.length === 0) {
+    throw new Error("Uploaded file is empty.");
+  }
   const kind = sniffMime(buffer, mimeType);
 
   if (kind === "pdf") return extractFromPdf(buffer, fileName, options);
@@ -74,9 +77,23 @@ async function extractFromPdf(
   let usedAiFallback = false;
   if (shouldRunAi(aiMode, signature.confidence)) {
     const aiResult = await aiLocateSignature(lastPage);
-    if (aiResult && shouldPreferAi(signature, aiResult)) {
-      signature = aiResult;
+    if (aiResult) {
+      // The fact that AI ran is itself useful UX information — flip the
+      // flag whenever we got an AI verdict back, not only when we adopted
+      // it. This is what makes the "AI" badge appear and gives the user
+      // visible feedback that their click did something.
       usedAiFallback = true;
+
+      if (shouldPreferAi(signature, aiResult)) {
+        signature = aiResult;
+      } else {
+        // AI was consulted and agreed (or was equal/lower confidence).
+        // Annotate the rationale so the user sees that something changed.
+        signature = {
+          ...signature,
+          rationale: appendAiAgreement(signature, aiResult),
+        };
+      }
     }
   }
 
@@ -111,9 +128,35 @@ function shouldPreferAi(
   deterministic: RegionResult,
   ai: RegionResult,
 ): boolean {
-  if (ai.detected && ai.confidence > deterministic.confidence) return true;
+  // AI found something we missed — always prefer.
   if (!deterministic.detected && ai.detected) return true;
+  // AI located the same region with higher confidence — prefer.
+  if (ai.detected && ai.confidence > deterministic.confidence) return true;
+  // Both agree there's no signature, but AI is more confident in the
+  // absence verdict. Adopt AI's rationale so the user sees vision was
+  // consulted (e.g. "Claude saw no signature on the last page").
+  if (
+    !deterministic.detected &&
+    !ai.detected &&
+    ai.confidence > deterministic.confidence
+  ) {
+    return true;
+  }
   return false;
+}
+
+/**
+ * When AI was consulted but we kept the deterministic crop, append a
+ * one-liner to the rationale so the user sees that AI actually ran.
+ */
+function appendAiAgreement(
+  deterministic: RegionResult,
+  ai: RegionResult,
+): string {
+  const verdict = ai.detected
+    ? `agreed a signature is present (Claude conf ${(ai.confidence * 100).toFixed(0)}%)`
+    : `also found no signature (Claude conf ${(ai.confidence * 100).toFixed(0)}%)`;
+  return `${deterministic.rationale} · Claude vision (Haiku) ${verdict}.`;
 }
 
 async function renderMiddleSample(

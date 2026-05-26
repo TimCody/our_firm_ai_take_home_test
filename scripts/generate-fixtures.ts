@@ -178,20 +178,35 @@ function drawFooter(
   pageNumber?: number,
   totalPages?: number,
 ) {
-  const bottom = doc.page.height - 60;
-  doc
-    .strokeColor(PALETTE.dim)
-    .lineWidth(0.5)
-    .moveTo(72, bottom)
-    .lineTo(540, bottom)
-    .stroke();
-  doc.fillColor(PALETTE.dim).fontSize(9).font("Helvetica");
-  doc.text(text, 72, bottom + 6, { width: 468, align: "left" });
-  if (pageNumber !== undefined && totalPages !== undefined) {
-    doc.text(`Page ${pageNumber} of ${totalPages}`, 72, bottom + 6, {
+  // PDFKit auto-paginates whenever doc.text() positions PAST the bottom
+  // margin (default 72pt). Our footer lives below that margin by design,
+  // so we temporarily collapse the bottom margin to draw absolutely.
+  // Restoring the margin afterwards keeps subsequent flow on the same page.
+  const originalBottomMargin = doc.page.margins.bottom;
+  doc.page.margins.bottom = 0;
+  try {
+    const bottom = doc.page.height - 60;
+    doc
+      .strokeColor(PALETTE.dim)
+      .lineWidth(0.5)
+      .moveTo(72, bottom)
+      .lineTo(540, bottom)
+      .stroke();
+    doc.fillColor(PALETTE.dim).fontSize(9).font("Helvetica");
+    doc.text(text, 72, bottom + 6, {
       width: 468,
-      align: "right",
+      align: "left",
+      lineBreak: false,
     });
+    if (pageNumber !== undefined && totalPages !== undefined) {
+      doc.text(`Page ${pageNumber} of ${totalPages}`, 72, bottom + 6, {
+        width: 468,
+        align: "right",
+        lineBreak: false,
+      });
+    }
+  } finally {
+    doc.page.margins.bottom = originalBottomMargin;
   }
 }
 

@@ -11,6 +11,18 @@
 
 export type PresetId = "demo" | "mvp" | "department" | "enterprise";
 
+/**
+ * Strip only the *blank* leading and trailing lines from a template
+ * literal — preserves indentation on the first content line.
+ *
+ * String.prototype.trim() would also eat the leading 14 spaces of a
+ * left-padded box, detaching the top-left corner from the rest of the box.
+ * That bug was visible as a "floating" `┌─────┐` row above the diagram.
+ */
+function stripBlankLines(s: string): string {
+  return s.replace(/^[ \t]*\n|\n[ \t]*$/g, "");
+}
+
 export interface Preset {
   id: PresetId;
   title: string;
@@ -43,7 +55,7 @@ export const PRESETS: Preset[] = [
     },
     thresholdRationale:
       "0.65 is the standard \"flag-for-review\" threshold for early experiments. Low enough that easy fixtures pass, high enough that low-contrast cases flag.",
-    diagram: `
+    diagram: stripBlankLines(`
 ┌────────────┐         ┌────────────────┐         ┌──────────────────┐
 │  Browser   │  HTTP   │ Vite :5173     │  proxy  │ Express :3001    │
 │ (vanilla   │ ───────►│ (dev server +  │ ───────►│ (single Node     │
@@ -59,7 +71,7 @@ export const PRESETS: Preset[] = [
                                             │ mammoth  │     │ (manual     │
                                             │ (local)  │     │  trigger)   │
                                             └──────────┘     └─────────────┘
-`.trim(),
+`),
     notes: [
       "Everything in one Node process. No database, no queue, no auth.",
       "PDFs are processed in-memory; nothing persisted between requests.",
@@ -78,35 +90,43 @@ export const PRESETS: Preset[] = [
       confidenceThreshold: 0.70,
     },
     thresholdRationale:
-      "0.70 raises the bar a touch from the demo — real users will spot misclassifications faster than a reviewer. Still well below the strict 0.85 we'd use at scale, because the population of doc types is still being learned.",
-    diagram: `
-              ┌───────────────────┐
-              │     nginx / ALB   │
-              └─────────┬─────────┘
-                        │
-              ┌─────────┴─────────┐
-              ▼                   ▼
-       ┌──────────────┐     ┌──────────────┐
-       │ Static front │     │ Backend      │
-       │   (S3 + CF)  │     │ (1-2 ECS     │
-       │              │     │  tasks)      │
-       └──────────────┘     └──────┬───────┘
-                                   │
-              ┌──────────┬─────────┼─────────────┬─────────────┐
-              ▼          ▼         ▼             ▼             ▼
-        ┌──────────┐ ┌──────┐ ┌─────────┐  ┌──────────┐ ┌──────────┐
-        │ Postgres │ │  S3  │ │Anthropic│  │   SSO    │ │  Sentry  │
-        │ (docs,   │ │      │ │  API    │  │  (Okta/  │ │ (errors) │
-        │ results, │ │      │ │ + $/day │  │  Azure)  │ │          │
-        │ users)   │ │      │ │   cap   │  │          │ │          │
-        └──────────┘ └──────┘ └─────────┘  └──────────┘ └──────────┘
-`.trim(),
+      "0.70 raises the bar a touch from the demo — real users spot misclassifications faster than a reviewer. Still well below the 0.85 we'd use at scale, because at 250 docs/day we're still learning what the population of doc types even looks like.",
+    diagram: stripBlankLines(`
+            ┌──────────────────────┐
+            │  Frontend (S3 + CF)  │
+            └──────────┬───────────┘
+                       │ upload
+                       ▼
+            ┌──────────────────────┐         ┌────────────┐
+            │   API Gateway + WAF  │ ◄─────  │  Cognito   │
+            │   (HTTP API)         │         │  + Okta /  │
+            └──────────┬───────────┘         │  Azure SSO │
+                       ▼                     └────────────┘
+            ┌──────────────────────┐
+            │   Extract Lambda     │
+            │  (single fn handles  │
+            │   PDF / DOCX / image │
+            │   in-process)        │
+            └──────────┬───────────┘
+                       │
+          ┌────────────┼─────────────┬───────────────┐
+          ▼            ▼             ▼               ▼
+    ┌──────────┐ ┌──────────┐  ┌──────────┐  ┌──────────────┐
+    │   S3     │ │ Bedrock  │  │ DynamoDB │  │ CloudWatch + │
+    │ blobs +  │ │  Claude  │  │ results, │  │ AWS Budgets  │
+    │  crops   │ │  vision  │  │ user     │  │ ($/day cap;  │
+    │ (signed  │ │ (opt-in  │  │ history  │  │ per-user     │
+    │  URLs)   │ │  via UI) │  │          │  │ rate limit)  │
+    └──────────┘ └──────────┘  └──────────┘  └──────────────┘
+`),
     notes: [
-      "Synchronous extraction — at 250 docs/day you don't need a queue yet.",
-      "Postgres stores doc metadata + extraction history. Original blobs + region crops in S3 with signed URLs.",
-      "AI budget cap: hard $10/day ceiling per tenant, with per-user 20/hour rate limit. Stops a single bug from running up a bill.",
-      "SSO via Okta/Azure AD — assume the org already has it; no new identity surface to maintain.",
-      "Why this fits: the smallest setup that's actually safe to give to real users. Anything less skips auth or persistence.",
+      "Single Lambda handles the whole extraction in-process — at 100-500 docs/day (~1 every 5 min on average) a queue is premature. The serverless DNA matches the Department + Enterprise diagrams so the migration path is just \"split this Lambda into a queue + worker pool\" when throughput demands it.",
+      "Bedrock is opt-in — same \"Improve with LLM\" UX as the demo. Predictable spend while users learn what auto-extraction is actually good for at their org.",
+      "AWS Budgets enforces a hard $/day ceiling per tenant + per-user rate limit at the API Gateway WAF. A misbehaving client can't run up a bill before someone notices.",
+      "Cognito federated to the org's existing SSO (Okta or Azure AD) — no new identity surface to operate.",
+      "S3 holds both original blobs and region crops; the UI downloads via signed URLs so docs never go through the API.",
+      "DynamoDB stores results + user history. Single-tenant for now, but the table is already partitioned by userId so multi-tenancy is a column-add later.",
+      "Why this fits: the smallest serverless setup that's safe to give to real users. Same primitives as the larger tiers; the queue, cascade, dedup, and sibling HITL service get bolted on at the Department and Enterprise sizes.",
     ],
   },
   {
@@ -120,49 +140,58 @@ export const PRESETS: Preset[] = [
       confidenceThreshold: 0.80,
     },
     thresholdRationale:
-      "0.80 is where you trust auto-approval but keep a HITL queue for the long tail. At this scale, false positives become operational cost (downstream consumers act on bad crops), so the threshold tightens.",
-    diagram: `
-                  ┌──────────────────┐
-                  │   CloudFront     │
-                  └────────┬─────────┘
-                           │
-                  ┌────────▼─────────┐
-                  │   API Gateway    │
-                  └────────┬─────────┘
-                           │
-              ┌────────────┼────────────┐
-              │            │            │
-              ▼            ▼            ▼
-       ┌────────────┐ ┌────────┐ ┌─────────────┐
-       │ API pool   │ │ HITL   │ │ Extract     │
-       │ (ECS, 4-8  │ │ review │ │ workers     │
-       │  tasks)    │ │ UI     │ │ (ECS, 8-16) │
-       └──────┬─────┘ └────────┘ └──────┬──────┘
-              │                         │
-              ▼                         ▼
-       ┌──────────┐              ┌─────────────┐
-       │   SQS    │ ───── jobs ──►│  OCR sub-   │
-       │  queues  │              │  pool       │
-       └──────────┘              │  (tesseract │
-                                 │   workers)  │
-                                 └──────┬──────┘
-                                        │
-       ┌───────┬──────────────────┬─────┴───────┬────────────┐
-       ▼       ▼                  ▼             ▼            ▼
-  ┌───────┐ ┌──────┐ ┌────────────────┐ ┌──────────┐ ┌──────────┐
-  │ RDS   │ │  S3  │ │ AWS Bedrock    │ │  Redis   │ │ Datadog  │
-  │ (PG)  │ │      │ │ (Claude in     │ │ (cache + │ │ (APM +   │
-  │       │ │      │ │  VPC)          │ │  rate    │ │  cost    │
-  │       │ │      │ │                │ │  limit)  │ │  budget) │
-  └───────┘ └──────┘ └────────────────┘ └──────────┘ └──────────┘
-`.trim(),
+      "0.80 is where auto-approval becomes trusted but the long tail still goes to a reviewer. At 5-15k docs/day, false positives become operational cost (downstream consumers act on bad crops), so the threshold tightens from MVP's 0.70.",
+    diagram: stripBlankLines(`
+            ┌──────────────────────┐
+            │  Frontend (S3 + CF)  │
+            └──────────┬───────────┘
+                       │ upload
+                       ▼
+            ┌──────────────────────┐         ┌────────────┐
+            │   API Gateway + WAF  │ ◄─────  │  Cognito   │
+            └──────────┬───────────┘         │   + SSO    │
+                       ▼                     └────────────┘
+            ┌──────────────────────┐
+            │   Upload Lambda      │
+            │ writes blob → S3,    │
+            │ enqueues job,        │
+            │ stamps tenantId      │
+            └──────────┬───────────┘
+                       ▼
+                ┌─────────────┐
+                │ SQS work Q  │
+                │ (+ DLQ)     │
+                └──────┬──────┘
+                       ▼
+            ┌──────────────────────┐
+            │ Extract worker pool  │
+            │ (Lambda concurrency) │
+            │ Textract first;      │
+            │ Bedrock on miss      │
+            └──────────┬───────────┘
+                       ▼
+            ┌──────────────────────┐         ┌─────────────┐
+            │ Confidence router λ  │ ◄─────  │ CloudWatch  │
+            │ ≥ 0.80 → DDB         │         │ latency     │
+            │ < 0.80 → HITL queue  │         │ $ / tenant  │
+            └────┬─────────────┬───┘         │ DLQ depth   │
+                 │ < 0.80      │ ≥ 0.80      │ error rate  │
+                 ▼             ▼             └─────────────┘
+           ┌──────────────┐ ┌──────────┐
+           │  SQS HITL Q  │ │ DynamoDB │
+           │  + DLQ on 3x │ │ results  │
+           │ → in-app     │ │ (tenant- │
+           │   review UI  │ │  tagged) │
+           └──────────────┘ └──────────┘
+`),
     notes: [
-      "Async by default: upload → SQS → worker picks up. Decouples burst spikes from latency.",
-      "Separate worker pools for extract vs HITL — load isolation so one team's review surge doesn't slow extraction.",
-      "OCR worker subpool handles scanned PDFs (no text layer); the dispatcher routes based on the text-layer empty check.",
-      "AWS Bedrock instead of direct Anthropic API: stays inside the VPC for compliance review (HIPAA / financial data).",
-      "Redis caches recent extractions (some docs are re-uploaded) and enforces per-user rate limits.",
-      "Why this fits: 5k docs/day is the breaking point for sync extraction. Async + worker pools is the next architectural unit.",
+      "SQS between API and extraction — sync starts hurting past ~200/hr; the queue also gives us free retry + DLQ for transient failures.",
+      "Cost cascade begins: Textract handles forms + tables ($1.50/1k pages, AWS-native); Bedrock Claude vision fires only on misses. At 5-15k docs/day, AI-on-everything dominates the bill and this ordering is what keeps it sane.",
+      "Confidence router is its own Lambda — lets us tune the threshold or change routing logic without touching the extract workers.",
+      "HITL queue + in-app review UI — at this size a dedicated review pane inside the existing app works. The sibling HITL Review *service* (separate product, RBAC, audit) only earns its keep at enterprise scale.",
+      "tenantId stamping starts in the Upload Lambda and threads through to DynamoDB rows. Cost Explorer reports per-tenant become possible before someone asks.",
+      "CloudWatch metrics include $/tenant + DLQ depth — finance + on-call have what they need without a separate APM bill.",
+      "Why this fits: at 5-15k docs/day the queue + cost cascade are the architectural primitives that can't be skipped. Anything less can't survive the throughput; anything more (dedup, region-selector, sibling HITL) is premature here and ships at Enterprise scale.",
     ],
   },
   {
@@ -176,50 +205,98 @@ export const PRESETS: Preset[] = [
       confidenceThreshold: 0.85,
     },
     thresholdRationale:
-      "0.85 — combined with domain-specific fine-tuned models, we expect 90%+ auto-approval rates. The remaining 10-15% routes to a dedicated HITL platform with SLAs.",
-    diagram: `
-                          ┌────────────────────────┐
-                          │  Multi-region CDN      │
-                          └───────────┬────────────┘
-                                      │
-              ┌───────────────────────┴───────────────────────┐
-              ▼                                               ▼
-      ┌──────────────┐                                ┌──────────────┐
-      │  Region: US  │                                │  Region: EU  │
-      │ (same stack  │                                │ (same stack  │
-      │  per region) │                                │  per region) │
-      └──────┬───────┘                                └──────────────┘
-             │
-   ┌─────────┼──────────────┬────────────────┬───────────────┐
-   ▼         ▼              ▼                ▼               ▼
-┌──────┐ ┌────────┐  ┌──────────────┐ ┌──────────────┐ ┌──────────┐
-│ API  │ │ GPU    │  │ Domain FT    │ │ HITL         │ │ Audit    │
-│ pool │ │ workers│  │ models       │ │ platform     │ │ log      │
-│(k8s) │ │ (own   │  │ (per doc-    │ │ (separate    │ │(immutable│
-│      │ │  ML    │  │  type;       │ │  product)    │ │  ledger) │
-│      │ │ infer) │  │  Bedrock +   │ │              │ │          │
-│      │ │        │  │  ours)       │ │              │ │          │
-└──┬───┘ └────────┘  └──────┬───────┘ └──────────────┘ └──────────┘
-   │                        │
-   └───────────┬────────────┘
-               ▼
-        ┌────────────────┐
-        │ Aurora +       │
-        │ pgvector +     │
-        │ full-text idx  │
-        │ (semantic      │
-        │  search across │
-        │  extracted     │
-        │  regions)      │
-        └────────────────┘
-`.trim(),
+      "0.85 — Bedrock vision rarely fires (gated by the region-selector λ and the Textract/Tesseract cascade), so when it does we trust the result above 0.85. The remaining ~10-15% routes to a sibling HITL Review service with its own SLAs.",
+    diagram: stripBlankLines(`
+            ┌──────────────────────┐
+            │  S3 landing bucket   │
+            │  PDF / DOCX / image  │
+            └──────────┬───────────┘
+                       │ ObjectCreated
+                       ▼
+            ┌──────────────────────┐
+            │     EventBridge      │
+            │ routes by ext + meta │
+            └──────────┬───────────┘
+                       ▼
+            ┌──────────────────────┐
+            │  Dedup check (DDB    │
+            │  cond. write on      │
+            │  sha256 of bytes)    │
+            └──────────┬───────────┘
+                       ▼
+            ┌──────────────────────┐
+            │  Classifier Lambda   │
+            │ detects type · tags  │
+            │ tenantId + traceId   │
+            └─┬─────────┬────────┬─┘
+              │ PDF     │ DOCX   │ scan
+              ▼         ▼        ▼
+        ┌──────────┐┌────────┐┌────────────┐
+        │ Step Fn: ││Step Fn:││  Step Fn:  │
+        │   PDF    ││  DOCX  ││  scan/img  │
+        │          ││        ││            │
+        │ Textract ││mammoth ││ Tesseract  │
+        │  async   ││→ HTML  ││ → Textract │
+        │ (forms + ││        ││ (cascade   │
+        │  tables) ││        ││  on miss)  │
+        └─────┬────┘└───┬────┘└─────┬──────┘
+              └─────────┼───────────┘
+                        ▼
+            ┌──────────────────────┐
+            │ Region-selector λ    │
+            │ skip regions this    │
+            │ doc type won't need  │
+            └──────────┬───────────┘
+                       ▼
+            ┌──────────────────────┐       ┌─────────────┐
+            │ Bedrock · Claude     │       │ CloudWatch  │
+            │ vision (only the     │ ◄──── │ latency     │
+            │ requested regions)   │       │ $ / tenant  │
+            └──────────┬───────────┘       │ DLQ depth   │
+                       ▼                   │ conf. drift │
+            ┌──────────────────────┐ ◄──── │ error rate  │
+            │ Confidence router λ  │       └─────────────┘
+            │ ≥ 0.85 → auto        │
+            │ < 0.85 → HITL queue  │
+            └────┬─────────────┬───┘
+                 │ < 0.85      │ ≥ 0.85
+                 ▼             │
+           ┌──────────────┐    │
+           │ SQS HITL Q   │    │
+           │ DLQ on 3x    │    │
+           │ → HITL svc   │    │
+           │   (sibling   │    │
+           │    system)   │    │
+           └──────┬───────┘    │
+                  │ approved   │
+                  └──────┬─────┘
+                         ▼
+            ┌──────────────────────┐
+            │      DynamoDB        │
+            │ regions + S3 keys +  │
+            │ tenantId + traceId   │
+            └──────┬───────────────┘
+                   │
+         ┌─────────┴──────────┐
+         │                    │ DDB Streams
+         ▼                    ▼
+   ┌──────────────────┐  ┌──────────────┐
+   │ SNS → API GW WS  │  │  Athena /    │
+   │ → attorney UI    │  │  Aurora      │
+   └──────────────────┘  │  (analytics) │
+                         └──────────────┘
+`),
     notes: [
-      "Domain-specific fine-tuned models replace Claude on known doc types (contracts, leases, NDAs). Claude becomes a fallback for rare/novel templates.",
-      "pgvector enables semantic search across extracted regions — \"find every contract where the signature is on page 3.\"",
-      "Multi-region for data residency (US + EU); per-tenant region pin. Cross-region replication only for global tenants.",
-      "Immutable audit log (append-only, queryable separately) — compliance for SOX, HIPAA, GxP depending on tenant.",
-      "Per-tenant cost allocation: every extraction tags its row with tenant + model used; finance can pull usage by tenant for billing.",
-      "Why this fits: at this scale, generic AI is too expensive and too slow. Specialization pays for itself. Domain models are 10-20× cheaper per call.",
+      "S3-first ingestion decouples upload throughput from extraction. Multi-GB scans don't time out an API; bursts buffer naturally in S3.",
+      "Quality cascade keeps cost economics sane at 100k+ docs/day: Tesseract (free, on-box) → Textract (~$1.50/1k pages, AWS-native) → Bedrock Claude vision (premium, only when needed). For known doc types Textract often wins outright; Bedrock is the long-tail tier.",
+      "Region-selector λ between the format pipelines and Bedrock skips Claude calls for regions a given doc type doesn't need (invoices want forms+tables, not signatures). Empirically cuts Bedrock spend 30-50%.",
+      "Content-hash dedup (DynamoDB conditional write on sha256(bytes)) catches duplicate S3 ObjectCreated events AND user re-uploads at the cheapest possible point — before any pipeline runs.",
+      "tenantId + traceId are stamped by the Classifier Lambda and threaded through every Bedrock call, DDB write, and SQS message. Cost Explorer and per-tenant cost dashboards become trivial; finance can answer \"which customer is costing us $X this month\" without rebuilding instrumentation.",
+      "DynamoDB is the hot store (point reads by docId — what the UI calls). DDB Streams fan out to Athena/Aurora for analytics queries (\"every contract Jane Smith signed in Q2\", confidence drift by doc type). Right tool for each query pattern instead of forcing one store to do both badly.",
+      "HITL Review is a sibling system — it owns the queue worker, the reviewer UI, RBAC, audit trail, and its own SLAs. Naming it here without drawing it keeps this diagram about extraction; the review platform is its own product lifecycle.",
+      "CloudWatch metrics include Conf. drift — alerts when recent docs score lower than historical at the same threshold. The signal that your classifier or upstream OCR is silently degrading, before users notice.",
+      "Multi-region (US + EU) for data residency is a per-tenant routing decision at the S3 bucket layer — entire stack from S3 onwards pins to one region per tenant. Bedrock model availability varies by region, so the routing layer also picks the closest supported region.",
+      "Why this fits: serverless + managed services lets a small platform team operate the whole stack. The cascade keeps cost predictable at 100k+ docs/day, where flat-rate Claude-on-everything is a finance-review red flag.",
     ],
   },
 ];

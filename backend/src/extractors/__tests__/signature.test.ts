@@ -34,7 +34,7 @@ function item(
 }
 
 describe("findBySignOffToken", () => {
-  it("locates a 'Sincerely,' sign-off in the bottom half", () => {
+  it("locates a 'Sincerely,' sign-off near the bottom of the page", () => {
     const page = makePage([
       item("Body text here.", 50, 100),
       item("Sincerely,", 50, 800),
@@ -50,10 +50,36 @@ describe("findBySignOffToken", () => {
     expect(findBySignOffToken(page)).not.toBeNull();
   });
 
-  it("ignores sign-off tokens that appear in body text (top half)", () => {
-    // "I sincerely apologize" in the body shouldn't trigger.
+  it("finds a sign-off in the upper-middle of a short letter", () => {
+    // Short letters often place the sign-off at ~30-50% down the page.
+    // The earlier "bottom half only" filter caused us to miss these.
     const page = makePage([
-      item("I sincerely apologize for the delay.", 50, 100),
+      item("Body text here.", 50, 100),
+      item("Warmly,", 50, 300),
+      item("Priya Subramanian", 50, 350),
+    ]);
+    const result = findBySignOffToken(page);
+    expect(result).not.toBeNull();
+    expect(result!.rationale.toLowerCase()).toContain("warmly");
+  });
+
+  it("picks the LAST sign-off when multiple short matches appear", () => {
+    // Body line "regards from the team" is short enough to slip past the
+    // length filter, but the real sign-off "Sincerely," lives further down.
+    // We must pick the later one.
+    const page = makePage([
+      item("regards from the team", 50, 200),
+      item("Sincerely,", 50, 800),
+    ]);
+    const result = findBySignOffToken(page)!;
+    expect(result.box.y).toBeGreaterThan(700);
+  });
+
+  it("ignores long body lines that happen to contain sign-off words", () => {
+    // "I sincerely apologize for the delay." is 36 chars — well over our
+    // 30-char sign-off-line-length filter. Real sign-offs are short.
+    const page = makePage([
+      item("I sincerely apologize for the delay.", 50, 800),
     ]);
     expect(findBySignOffToken(page)).toBeNull();
   });
@@ -73,7 +99,7 @@ describe("findBySignOffToken", () => {
   it("recognizes all configured sign-off tokens", () => {
     // Regression guard: if someone shortens the token list, this test catches it.
     for (const token of SIGN_OFF_TOKENS) {
-      const page = makePage([item(`${token} placeholder`, 50, 800)]);
+      const page = makePage([item(`${token} x`, 50, 800)]);
       expect(findBySignOffToken(page), `should match: "${token}"`).not.toBeNull();
     }
   });

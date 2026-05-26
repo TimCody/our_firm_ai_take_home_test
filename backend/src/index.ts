@@ -1,4 +1,5 @@
-import "dotenv/config";
+// MUST be first — populates process.env before any other module loads.
+import "./load-env.js";
 import { createServer } from "./server.js";
 
 const port = Number(process.env.PORT ?? 3001);

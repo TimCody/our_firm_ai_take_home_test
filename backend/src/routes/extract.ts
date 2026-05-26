@@ -1,6 +1,7 @@
 import express from "express";
 import multer from "multer";
 import { extractDocument, type AiMode } from "../extractors/index.js";
+import { classifyError } from "../lib/error-classifier.js";
 
 const MAX_UPLOAD_BYTES = Number(process.env.MAX_UPLOAD_BYTES ?? 25 * 1024 * 1024);
 
@@ -11,7 +12,20 @@ export function extractRoute() {
     limits: { fileSize: MAX_UPLOAD_BYTES },
   });
 
-  router.post("/", upload.single("file"), async (req, res, next) => {
+  // Wrap multer so a LIMIT_FILE_SIZE (or any upload-layer) failure goes
+  // through our error classifier and returns 4xx, not 500.
+  const uploadOrError: express.RequestHandler = (req, res, next) => {
+    upload.single("file")(req, res, (err) => {
+      if (err) {
+        const { status, message } = classifyError(err, MAX_UPLOAD_BYTES);
+        res.status(status).json({ error: message });
+        return;
+      }
+      next();
+    });
+  };
+
+  router.post("/", uploadOrError, async (req, res, next) => {
     try {
       if (!req.file) {
         res.status(400).json({ error: "No file uploaded under field 'file'." });
@@ -23,30 +37,15 @@ export function extractRoute() {
       });
       res.json(result);
     } catch (err) {
-      // Multer errors and our own thrown errors land here. Translate
-      // user-facing messages into 4xx where appropriate.
-      if (err instanceof Error) {
-        const msg = err.message;
-        if (msg.startsWith("Unsupported file type")) {
-          res.status(415).json({ error: msg });
-          return;
-        }
-        if (msg.includes("Could not determine image dimensions")) {
-          res.status(422).json({ error: msg });
-          return;
-        }
-        if (msg.includes("Invalid PDF") || msg.includes("PDF")) {
-          // pdfjs throws "InvalidPDFException" — surface as 422.
-          if (
-            msg.toLowerCase().includes("invalid") ||
-            msg.toLowerCase().includes("corrupt")
-          ) {
-            res.status(422).json({ error: `Could not parse PDF: ${msg}` });
-            return;
-          }
-        }
+      const { status, message } = classifyError(err, MAX_UPLOAD_BYTES);
+      if (status === 500) {
+        // Genuinely unexpected — log it and let the central handler decide.
+        // eslint-disable-next-line no-console
+        console.error("[extract] unhandled:", err);
+        next(err);
+        return;
       }
-      next(err);
+      res.status(status).json({ error: message });
     }
   });
 
