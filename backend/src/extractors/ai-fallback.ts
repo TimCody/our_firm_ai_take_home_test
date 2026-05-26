@@ -30,14 +30,30 @@ export interface AiRegionVerdicts {
   signature?: RegionResult;
 }
 
+// 60 seconds. The SDK's default timeout is ~10 minutes which is way
+// too long for a UI-blocking call. We'd rather fail fast and let the
+// user retry than leave the button stuck in "Calling Claude..."
+const REQUEST_TIMEOUT_MS = 60_000;
+
 export async function aiLocateRegions(
   page: PageRender,
 ): Promise<AiRegionVerdicts | null> {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) return null;
 
+  // eslint-disable-next-line no-console
+  console.log(
+    `[ai-fallback] calling ${AI_MODEL} for last page (${page.width}x${page.height})...`,
+  );
+
   try {
-    const client = new Anthropic({ apiKey });
+    const client = new Anthropic({
+      apiKey,
+      timeout: REQUEST_TIMEOUT_MS,
+      maxRetries: 1,
+    });
+
+    const startedAt = Date.now();
     const response = await client.messages.create({
       model: AI_MODEL,
       max_tokens: 500,
@@ -58,6 +74,10 @@ export async function aiLocateRegions(
         },
       ],
     });
+    // eslint-disable-next-line no-console
+    console.log(
+      `[ai-fallback] response received in ${Date.now() - startedAt}ms`,
+    );
 
     const textBlock = response.content.find((b) => b.type === "text");
     if (!textBlock || textBlock.type !== "text") return null;
@@ -78,14 +98,49 @@ export async function aiLocateRegions(
     };
   } catch (err) {
     // We deliberately swallow this. If the AI call fails for any reason,
-    // the deterministic result stays put and the user sees no error.
-    // eslint-disable-next-line no-console
-    console.warn(
-      "[ai-fallback] vision call failed, keeping deterministic result:",
-      err instanceof Error ? err.message : err,
-    );
+    // the deterministic result stays put and the request still succeeds.
+    // We DO log everything we can about the error here so the dev can
+    // diagnose. The SDK's default "Connection error." message hides the
+    // underlying fetch failure, which lives on `err.cause`.
+    logVisionCallFailure(err);
     return null;
   }
+}
+
+function logVisionCallFailure(err: unknown): void {
+  /* eslint-disable no-console */
+  console.warn("[ai-fallback] vision call failed, keeping deterministic result.");
+  if (err instanceof Error) {
+    console.warn("  message:", err.message);
+    const anyErr = err as Error & {
+      status?: number;
+      cause?: unknown;
+      headers?: Record<string, string>;
+    };
+    if (anyErr.status !== undefined) {
+      console.warn("  HTTP status:", anyErr.status);
+    }
+    if (anyErr.headers?.["request-id"]) {
+      console.warn("  request-id:", anyErr.headers["request-id"]);
+    }
+    if (anyErr.cause) {
+      // The actual fetch/network error (DNS, TLS, ECONNREFUSED, etc.)
+      // gets wrapped here. This is what's usually most useful.
+      const cause = anyErr.cause;
+      if (cause instanceof Error) {
+        console.warn("  cause:", cause.message);
+        const causeWithCode = cause as Error & { code?: string };
+        if (causeWithCode.code) {
+          console.warn("  cause.code:", causeWithCode.code);
+        }
+      } else {
+        console.warn("  cause:", cause);
+      }
+    }
+  } else {
+    console.warn("  raw error:", err);
+  }
+  /* eslint-enable no-console */
 }
 
 function buildPrompt(): string {
