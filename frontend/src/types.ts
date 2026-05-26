@@ -33,11 +33,13 @@ export interface ExtractionResult {
   warnings: string[];
 }
 
+/** Client-side state for one uploaded document. */
 export interface DocState {
   id: string;
   file: File;
   status: "pending" | "extracting" | "ready" | "error";
   result?: ExtractionResult;
   error?: string;
+  /** True while an AI-improvement request is in flight. */
   improving?: boolean;
 }

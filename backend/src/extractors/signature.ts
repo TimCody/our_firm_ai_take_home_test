@@ -1,5 +1,10 @@
 import sharp from "sharp";
-import type { BoundingBox, PageRender, RegionResult, TextItem } from "../types.js";
+import type {
+  BoundingBox,
+  PageRender,
+  RegionResult,
+  TextItem,
+} from "../types.js";
 import { bufferToDataUrl, cropPng } from "./crop.js";
 import { groupIntoLines, lineText } from "../lib/text-layout.js";
 import {
@@ -8,12 +13,22 @@ import {
 } from "../lib/ink-density.js";
 
 /**
- * Signature extractor — operates on the last page.
+ * Signature extractor. Operates on the last page.
  *
- * Runs three independent search strategies and picks the highest-confidence
- * candidate. Each strategy is small and named so the rationale we return
- * to the UI matches the code path that produced it.
+ * The signature is the trickiest of the three regions. We run three
+ * independent search strategies in parallel and pick the highest-
+ * confidence candidate. Each strategy is small and named so the
+ * rationale we send to the UI matches the code path that produced it.
+ *
+ * Strategy comparison:
+ *   A. Sign-off token (e.g. "Sincerely,") - strongest signal, 0.78
+ *   B. Italic / script font - decent signal, 0.6
+ *   C. Ink-density scan (handwriting on raster) - last resort, 0.55
+ *
+ * If none of the three finds anything, we return "not detected" and
+ * the AI improvement step is the user's next move.
  */
+
 export const SIGN_OFF_TOKENS = [
   "sincerely",
   "regards",
@@ -44,7 +59,7 @@ export async function extractSignature(
   }
 
   const best = pickBest(candidates);
-  return await materializeCandidate(lastPage, best);
+  return materializeCandidate(lastPage, best);
 }
 
 interface Candidate {
@@ -55,6 +70,7 @@ interface Candidate {
 
 async function collectCandidates(page: PageRender): Promise<Candidate[]> {
   const results: Candidate[] = [];
+
   const token = findBySignOffToken(page);
   if (token) results.push(token);
 
@@ -68,7 +84,12 @@ async function collectCandidates(page: PageRender): Promise<Candidate[]> {
 }
 
 function pickBest(candidates: Candidate[]): Candidate {
-  return candidates.reduce((a, b) => (a.confidence >= b.confidence ? a : b));
+  let best = candidates[0]!;
+  for (let i = 1; i < candidates.length; i++) {
+    const c = candidates[i]!;
+    if (c.confidence > best.confidence) best = c;
+  }
+  return best;
 }
 
 async function materializeCandidate(
@@ -102,17 +123,16 @@ async function materializeCandidate(
 }
 
 /**
- * Strategy A: look for sign-off tokens ("Sincerely,", "Regards,", etc.).
+ * Strategy A: look for sign-off tokens.
  *
- * Originally we restricted this to the bottom 50% of the page, but short
- * letters often have the sign-off in the upper-middle (when there's only
- * one or two body paragraphs). So we now search the WHOLE page and pick
- * the LAST occurrence — sign-offs are by convention near the end of a
- * letter, so the latest match wins.
+ * We search the WHOLE page (not just the bottom half) and pick the
+ * LAST occurrence. Sign-offs are by convention near the end of a
+ * letter, so the latest match is almost always the right one.
  *
- * Body-text false-positives are avoided by a line-length filter: a real
- * sign-off line is short ("Sincerely," is 10 chars; "Best regards," is 13).
- * Body sentences containing words like "sincerely" run far longer.
+ * Body-text false positives are avoided by a line-length filter: a
+ * real sign-off line is short ("Sincerely," is 10 chars,
+ * "Best regards," is 13). Body sentences that happen to contain a
+ * word like "sincerely" run far longer.
  */
 const MAX_SIGN_OFF_LINE_LENGTH = 30;
 
@@ -120,19 +140,27 @@ export function findBySignOffToken(page: PageRender): Candidate | null {
   const { textItems, width, height } = page;
   const lines = groupIntoLines(textItems);
 
-  let lastMatch: { line: ReturnType<typeof groupIntoLines>[number]; token: string } | null = null;
+  // Walk all lines and remember the latest one that looks like a sign-off.
+  type Match = { line: ReturnType<typeof groupIntoLines>[number]; token: string };
+  let lastMatch: Match | null = null;
+
   for (const line of lines) {
     const text = lineText(line);
     if (text.length > MAX_SIGN_OFF_LINE_LENGTH) continue;
+
     const lower = text.toLowerCase();
     const token = SIGN_OFF_TOKENS.find((t) => lower.includes(t));
-    if (token) lastMatch = { line, token };
+    if (token) {
+      lastMatch = { line, token };
+    }
   }
-  if (!lastMatch) return null;
+
+  if (lastMatch === null) return null;
 
   const { line, token } = lastMatch;
   const top = Math.max(0, line.y - 4);
   const bottom = Math.min(height, line.y + line.height + 180);
+
   return {
     box: { x: 0, y: top, width, height: bottom - top },
     confidence: 0.78,
@@ -143,9 +171,11 @@ export function findBySignOffToken(page: PageRender): Candidate | null {
 }
 
 /**
- * Strategy B: look for italic / script fonts in the bottom half. PDFs that
- * use a font like "Helvetica-Oblique" or "BradleyHandITCTT" for the typed
- * name are common.
+ * Strategy B: look for italic or script fonts in the bottom half.
+ *
+ * Italic in the upper half is usually a heading, not a signature, so
+ * we restrict this search. PDFs with a font like "Helvetica-Oblique"
+ * or "BradleyHandITCTT" for the typed name will trigger this.
  */
 export function findByItalicFont(page: PageRender): Candidate | null {
   const { textItems, width, height } = page;
@@ -157,9 +187,11 @@ export function findByItalicFont(page: PageRender): Candidate | null {
   const lines = groupIntoLines(italicItems);
   if (lines.length === 0) return null;
 
-  const top = Math.max(0, lines[0]!.y - 6);
-  const last = lines[lines.length - 1]!;
-  const bottom = Math.min(height, last.y + last.height + 20);
+  const firstLine = lines[0]!;
+  const lastLine = lines[lines.length - 1]!;
+
+  const top = Math.max(0, firstLine.y - 6);
+  const bottom = Math.min(height, lastLine.y + lastLine.height + 20);
 
   return {
     box: { x: 0, y: top, width, height: bottom - top },
@@ -169,9 +201,16 @@ export function findByItalicFont(page: PageRender): Candidate | null {
 }
 
 /**
- * Strategy C: scan the rasterized bottom 40% for a horizontal band of
- * elevated ink density. Catches handwritten-image signatures that have
- * no text-layer representation.
+ * Strategy C: ink-density scan of the rasterized bottom 40%.
+ *
+ * Catches handwritten-image signatures that have no text-layer
+ * representation. We extract the bottom band, convert to grayscale,
+ * and look for a dense horizontal band that doesn't match a normal
+ * text row pattern.
+ *
+ * This is the only strategy that works on scanned/image-only PDFs,
+ * and it's also a useful backup when sign-off tokens aren't present
+ * (e.g. someone signed without typing "Sincerely,").
  */
 async function findByInkDensity(page: PageRender): Promise<Candidate | null> {
   const { pngBuffer, width, height } = page;
@@ -188,7 +227,7 @@ async function findByInkDensity(page: PageRender): Promise<Candidate | null> {
   const grayData = new Uint8Array(data);
   const rowDarkness = computeRowDarkness(grayData, info.width, info.height);
   const run = findDensestDarkRun(rowDarkness);
-  if (!run) return null;
+  if (run === null) return null;
 
   const padding = 8;
   const boxTop = scanTop + Math.max(0, run.start - padding);
@@ -199,7 +238,7 @@ async function findByInkDensity(page: PageRender): Promise<Candidate | null> {
     confidence: 0.55,
     rationale: `Ink-density scan found a dense band ${
       run.end - run.start
-    }px tall in the bottom 40% — likely a handwritten signature.`,
+    }px tall in the bottom 40%. Likely a handwritten signature.`,
   };
 }
 

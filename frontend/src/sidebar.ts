@@ -1,11 +1,11 @@
 /**
- * Sidebar: preset selector + live "X of N would be flagged" line.
+ * Sidebar: preset selector and the live "X of N would be flagged" line.
  *
- * The dials are gone — we now offer 4 discrete deployment scenarios that
- * each bundle deadline, throughput, user count, and recommended confidence
- * threshold into one opinionated choice. Showing presets instead of free
- * sliders is the more honest UX: each preset is "this is how I'd actually
- * run this system at that scale," not "configure it yourself."
+ * Four discrete presets bundle deadline, throughput, user count, and
+ * the recommended confidence threshold into one opinionated choice.
+ * Picking a preset shows engineering judgment ("here's how I'd run
+ * this at that scale"), where a slider would just ask the user to
+ * invent values.
  */
 import type { AppState } from "./state.js";
 import { PRESETS, type Preset, type PresetId } from "./presets.js";
@@ -24,6 +24,7 @@ export function renderPresetList(
   onSelect: (id: PresetId) => void,
 ): void {
   container.innerHTML = "";
+
   for (const preset of PRESETS) {
     const btn = document.createElement("button");
     btn.type = "button";
@@ -54,6 +55,7 @@ export function renderPresetDetail(
 
   const dl = document.createElement("dl");
   dl.className = "preset-detail-dl";
+
   const rows: [string, string][] = [
     ["Deadline", preset.context.deadline],
     ["Users", preset.context.users],
@@ -80,9 +82,9 @@ export function renderPresetDetail(
 }
 
 /**
- * Live count: how many of the uploaded docs have any region below the
- * active preset's confidence threshold. This is what makes the preset
- * choice feel real — the user sees their docs get sorted as they switch.
+ * Count how many of the uploaded docs have any region below the active
+ * preset's confidence threshold. This is what makes the preset choice
+ * feel real: the user sees their docs get sorted as they switch presets.
  */
 export function computeFlaggedCount(
   docs: DocState[],
@@ -90,15 +92,23 @@ export function computeFlaggedCount(
 ): { flagged: number; total: number } {
   let flagged = 0;
   let total = 0;
+
   for (const doc of docs) {
     if (!doc.result) continue;
     total++;
+
     const regions = Object.values(doc.result.regions);
-    const anyBelow = regions.some(
-      (r) => !r.detected || r.confidence < threshold,
-    );
+    let anyBelow = false;
+    for (const r of regions) {
+      if (!r.detected || r.confidence < threshold) {
+        anyBelow = true;
+        break;
+      }
+    }
+
     if (anyBelow) flagged++;
   }
+
   return { flagged, total };
 }
 
@@ -115,7 +125,7 @@ export function formatImpact(flagged: number, total: number): string {
 }
 
 export function updateSidebar(refs: SidebarRefs, state: AppState): void {
-  // Sync aria-pressed state on the preset buttons.
+  // Keep the preset cards' aria-pressed state in sync with the store.
   for (const btn of refs.presetList.querySelectorAll<HTMLButtonElement>(
     ".preset-card",
   )) {

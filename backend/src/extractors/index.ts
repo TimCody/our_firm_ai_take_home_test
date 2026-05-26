@@ -20,9 +20,14 @@ import type {
 } from "../types.js";
 
 /**
- * AI fallback policy. The default changed from "auto" to "off" — we now
- * never call the AI implicitly. The frontend's "Improve with LLM" button
- * sets `on` explicitly after showing the cost preview.
+ * AI policy modes.
+ *
+ *   off  - never call the AI. Deterministic only. This is the default.
+ *   on   - always call the AI. Used when the user clicks
+ *          "Improve with LLM" in the UI.
+ *   auto - call the AI when the deterministic signature confidence
+ *          falls below SIGNATURE_AI_FALLBACK_THRESHOLD. Useful for
+ *          batch workflows that don't have a human in the loop.
  */
 export type AiMode = "off" | "auto" | "on";
 
@@ -39,6 +44,7 @@ export async function extractDocument(
   if (buffer.length === 0) {
     throw new Error("Uploaded file is empty.");
   }
+
   const kind = sniffMime(buffer, mimeType);
 
   if (kind === "pdf") return extractFromPdf(buffer, fileName, options);
@@ -60,10 +66,14 @@ async function extractFromPdf(
   const pageCount = pdf.pageCount;
   const warnings: string[] = [];
 
+  // Render the first and last page at full scale. These are the pages
+  // we run extraction against.
   const firstPage = await pdf.renderPage(0, 2);
   const lastPage =
     pageCount === 1 ? firstPage : await pdf.renderPage(pageCount - 1, 2);
 
+  // For the footer's cross-page repetition signal, peek at one middle
+  // page (when there is one). Best-effort; failure is non-fatal.
   const middleSample = await renderMiddleSample(pdf, pageCount);
 
   let letterhead = await extractLetterhead(firstPage);
@@ -74,12 +84,15 @@ async function extractFromPdf(
   });
   let signature: RegionResult = await extractSignature(lastPage);
 
+  // AI step (opt-in). Reconcile its verdicts against the deterministic
+  // results so the user gets visible feedback that AI ran.
   let usedAiFallback = false;
   if (shouldRunAi(aiMode, signature.confidence)) {
     const aiResults = await aiLocateRegions(lastPage);
     if (aiResults) {
-      // AI ran — flip the flag so the UI shows the "AI" badge and the
-      // user gets visible feedback that their click did something.
+      // The fact that AI ran is itself useful information for the UI.
+      // Flip the flag whenever we got a verdict back, not only when
+      // we adopted it.
       usedAiFallback = true;
 
       if (aiResults.signature) {
@@ -88,9 +101,8 @@ async function extractFromPdf(
       if (aiResults.footer) {
         footer = reconcile(footer, aiResults.footer);
       }
-      // Letterhead lives on the FIRST page. AI only saw the last page, so
-      // its letterhead verdict is only valid for single-page docs (where
-      // firstPage === lastPage).
+      // Letterhead lives on the FIRST page. AI only saw the last page,
+      // so its letterhead verdict is only valid when first === last.
       if (pageCount === 1 && aiResults.letterhead) {
         letterhead = reconcile(letterhead, aiResults.letterhead);
       }
@@ -121,6 +133,7 @@ async function extractFromPdf(
 function shouldRunAi(mode: AiMode, deterministicConfidence: number): boolean {
   if (mode === "off") return false;
   if (mode === "on") return true;
+  // mode === "auto": fire when deterministic isn't confident enough.
   return deterministicConfidence < SIGNATURE_AI_FALLBACK_THRESHOLD;
 }
 
@@ -128,11 +141,12 @@ function shouldRunAi(mode: AiMode, deterministicConfidence: number): boolean {
  * Reconcile a deterministic verdict with an AI verdict for the same region.
  *
  * Three cases:
- *   1. AI found something we missed (or with higher confidence) → use AI.
- *   2. AI confidently confirms ABSENCE that we also said wasn't there →
- *      use AI's higher-confidence verdict + rationale.
- *   3. Anything else → keep deterministic but annotate the rationale so
- *      the user sees the click actually did something.
+ *   1. AI found something we missed (or with higher confidence) -> use AI.
+ *   2. AI confidently confirms ABSENCE that we also said wasn't there ->
+ *      use AI's higher-confidence verdict + rationale so the user sees
+ *      vision was consulted.
+ *   3. Anything else -> keep deterministic but annotate the rationale
+ *      so the user sees the click actually did something.
  */
 function reconcile(deterministic: RegionResult, ai: RegionResult): RegionResult {
   if (shouldPreferAi(deterministic, ai)) return ai;
@@ -146,8 +160,12 @@ function shouldPreferAi(
   deterministic: RegionResult,
   ai: RegionResult,
 ): boolean {
+  // AI found something we missed.
   if (!deterministic.detected && ai.detected) return true;
+  // AI located the same region with higher confidence.
   if (ai.detected && ai.confidence > deterministic.confidence) return true;
+  // Both agree there's nothing there, but AI is more confident in
+  // the absence verdict.
   if (
     !deterministic.detected &&
     !ai.detected &&
@@ -177,10 +195,17 @@ async function renderMiddleSample(
   try {
     return await pdf.renderPage(Math.floor(pageCount / 2), 1);
   } catch {
+    // Non-fatal. Cross-page repetition is a bonus signal, not a hard
+    // dependency.
     return null;
   }
 }
 
+/**
+ * Build thumbnail previews for the gallery. We render at low scale to
+ * keep the payload small, and cap at 8 pages so a 200-page PDF doesn't
+ * balloon the response.
+ */
 async function renderPreviews(
   pdf: Awaited<ReturnType<typeof loadPdf>>,
   ctx: {
@@ -192,13 +217,19 @@ async function renderPreviews(
 ): Promise<string[]> {
   const limit = Math.min(ctx.pageCount, 8);
   const previews: string[] = [];
+
   for (let i = 0; i < limit; i++) {
     let rendered: PageRender;
-    if (i === 0) rendered = ctx.firstPage;
-    else if (i === ctx.pageCount - 1 && ctx.pageCount > 1) rendered = ctx.lastPage;
-    else rendered = await pdf.renderPage(i, 0.6);
+    if (i === 0) {
+      rendered = ctx.firstPage;
+    } else if (i === ctx.pageCount - 1 && ctx.pageCount > 1) {
+      rendered = ctx.lastPage;
+    } else {
+      rendered = await pdf.renderPage(i, 0.6);
+    }
     previews.push(bufferToDataUrl(rendered.pngBuffer));
   }
+
   if (ctx.pageCount > limit) {
     ctx.warnings.push(
       `Document has ${ctx.pageCount} pages; preview thumbnails truncated to ${limit}.`,
@@ -209,8 +240,8 @@ async function renderPreviews(
 
 function buildCostEstimate(lastPage: PageRender): AiCostEstimate {
   // Three-region prompt (letterhead + footer + signature) is a touch
-  // longer than the old signature-only prompt and outputs a larger JSON,
-  // so we bump both budgets. Still pennies — Haiku 4.5 keeps it cheap.
+  // longer than the old signature-only prompt and outputs a larger
+  // JSON. Still pennies. Haiku 4.5 keeps it cheap.
   const e = estimateVisionCost({
     imageWidth: lastPage.width,
     imageHeight: lastPage.height,

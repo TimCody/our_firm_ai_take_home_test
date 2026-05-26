@@ -1,8 +1,8 @@
 import type { ExtractionResult } from "./types.js";
 
 /**
- * Thin HTTP layer. Keeps fetch/error decoding out of the UI module so
- * components only deal with promises that resolve to typed results.
+ * Thin HTTP layer. Keeps fetch and error decoding out of the UI module
+ * so components only deal with typed promises.
  */
 
 export interface HealthResponse {
@@ -28,6 +28,8 @@ export async function extractDocument(
 
   const res = await fetch(url, { method: "POST", body: formData });
   if (!res.ok) {
+    // The backend's classifyError produces a friendly `error` string
+    // for every 4xx. Surface it; the caller shows it directly.
     const body = await res.json().catch(() => ({ error: res.statusText }));
     throw new Error(body.error ?? `HTTP ${res.status}`);
   }

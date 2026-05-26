@@ -3,8 +3,10 @@ import { classifyError, formatBytes } from "../error-classifier.js";
 
 const MAX = 25 * 1024 * 1024;
 
-/** Build an Error with a custom `name` or `code` — the two discriminators
- *  pdfjs and multer use respectively. */
+/**
+ * Build an Error with a custom `name` or `code`. Those are the two
+ * discriminators pdfjs and multer use respectively.
+ */
 function makeError(opts: { name?: string; code?: string; message?: string }): Error {
   const e = new Error(opts.message ?? "");
   if (opts.name) e.name = opts.name;
@@ -86,7 +88,7 @@ describe("classifyError", () => {
 
   describe("DOCX errors", () => {
     it("matches JSZip 'end of central directory' (corrupt docx)", () => {
-      // The brief specifically calls out "corrupt documents" — for DOCX,
+      // The brief specifically calls out "corrupt documents". For DOCX,
       // mammoth wraps JSZip which throws this exact message.
       const v = classifyError(
         makeError({

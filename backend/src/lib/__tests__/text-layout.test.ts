@@ -40,7 +40,7 @@ describe("groupIntoLines", () => {
   });
 
   it("separates items whose y differs by more than tolerance", () => {
-    // Default tolerance is 4 — these are 6 apart.
+    // Default tolerance is 4 and these are 6 apart.
     const lines = groupIntoLines([
       item("top", 0, 100),
       item("bottom", 0, 106),
@@ -49,7 +49,7 @@ describe("groupIntoLines", () => {
   });
 
   it("groups items within tolerance even if y is off by 1-2px", () => {
-    // Often happens with PDF descenders — same line, slightly different y.
+    // Often happens with PDF descenders. Same line, slightly different y.
     const lines = groupIntoLines([
       item("regular", 0, 100),
       item("descender", 60, 102),
@@ -77,7 +77,7 @@ describe("groupIntoLines", () => {
   it("respects a custom tolerance", () => {
     const lines = groupIntoLines(
       [item("a", 0, 100), item("b", 0, 108)],
-      10, // generous tolerance — should group
+      10, // generous tolerance, should group
     );
     expect(lines).toHaveLength(1);
   });
@@ -118,7 +118,8 @@ describe("findTopCluster", () => {
 
   it("clusters within the configured window from the topmost item", () => {
     // clusterWindow defaults to 0.12 → 120px on a 1000-page.
-    // top item at y=50, window cutoff at y=170 — item at 100 in, 200 out.
+    // Top item at y=50, window cutoff at y=170, so item at 100 is in
+    // and item at 200 is out.
     const cluster = findTopCluster(
       [
         item("a", 0, 50),
@@ -141,7 +142,7 @@ describe("findTopCluster", () => {
 
 describe("isHorizontallyCentered", () => {
   it("recognizes centered text", () => {
-    // Page width 800, centerline 400. Item centered at 405 — within 8% (64px).
+    // Page width 800, centerline 400. Item centered at 405, within 8% (64px).
     const items = [item("Title", 380, 50, { width: 50 })];
     expect(isHorizontallyCentered(items, 800)).toBe(true);
   });

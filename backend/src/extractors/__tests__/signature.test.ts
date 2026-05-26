@@ -76,7 +76,7 @@ describe("findBySignOffToken", () => {
   });
 
   it("ignores long body lines that happen to contain sign-off words", () => {
-    // "I sincerely apologize for the delay." is 36 chars — well over our
+    // "I sincerely apologize for the delay." is 36 chars, well over our
     // 30-char sign-off-line-length filter. Real sign-offs are short.
     const page = makePage([
       item("I sincerely apologize for the delay.", 50, 800),

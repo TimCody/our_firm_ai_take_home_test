@@ -56,7 +56,7 @@ describe("findDensestDarkRun", () => {
   });
 
   it("returns null when only short runs exist (below minLength)", () => {
-    // minLength defaults to 12 — single dark row won't qualify.
+    // minLength defaults to 12. A single dark row won't qualify.
     expect(findDensestDarkRun([0, 0.5, 0])).toBeNull();
   });
 
@@ -82,7 +82,7 @@ describe("findDensestDarkRun", () => {
   it("ends the run at the first below-threshold row", () => {
     const rows = new Array(40).fill(0);
     for (let i = 0; i < 20; i++) rows[i] = 0.5;
-    // Row 20 is white — run should close at 20.
+    // Row 20 is white, so the run should close at 20.
     const run = findDensestDarkRun(rows);
     expect(run!.end).toBe(20);
   });

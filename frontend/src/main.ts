@@ -1,8 +1,9 @@
 /**
- * Top-level wiring. Single Store, DOM event handlers, and tells the
- * rendering modules when state has changed.
+ * Top-level wiring. One Store, DOM event handlers, and a subscriber
+ * that tells the rendering modules when state has changed.
  *
- * Kept deliberately linear — anything more than glue lives in its own module.
+ * Kept deliberately linear. Anything more than glue lives in its own
+ * module.
  */
 import "./styles.css";
 import { Store, createInitialState, savePresetId } from "./state.js";
@@ -137,8 +138,9 @@ function acceptFiles(files: File[]): void {
     activeId: s.activeId ?? newDocs[0]?.id ?? null,
   }));
   // Sequential extraction so the backend isn't slammed by N parallel
-  // pdfjs renders. With docs/day in the hundreds (MVP preset) this is fine;
-  // at department scale we'd switch to SQS workers (see the diagram).
+  // pdfjs renders. With docs/day in the hundreds (MVP preset) this is
+  // fine. At department scale we'd switch to SQS workers; see the
+  // architecture diagram.
   void extractQueue(newDocs.map((d) => d.id));
 }
 

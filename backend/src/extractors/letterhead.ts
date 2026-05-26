@@ -6,14 +6,16 @@ import {
 } from "../lib/text-layout.js";
 
 /**
- * Letterhead extractor — first page, top region.
+ * Letterhead extractor. First page, top region.
  *
- * Composed of two steps:
- *   1. Geometry: find the topmost text cluster (see `lib/text-layout`).
- *   2. Scoring: assess how letterhead-ish the cluster looks.
+ * Two steps:
+ *   1. Geometry. Find the topmost text cluster (see `lib/text-layout`).
+ *   2. Scoring. Assess how letterhead-ish that cluster looks.
  *
- * If no top-text cluster exists we fall back to "top 18% of the page" so
- * image-only PDFs still surface *something*.
+ * If there's no top-text cluster (image-only PDF, poster), we fall
+ * back to "top 18% of the page" so we still surface something visual.
+ * The confidence drops to 0.35, which sits below all our thresholds,
+ * so it'll flag in the UI.
  */
 
 const FALLBACK_CROP_RATIO = 0.18;
@@ -30,16 +32,16 @@ export async function extractLetterhead(
   let confidence: number;
   let rationale: string;
 
-  if (!cluster) {
+  if (cluster === null) {
     cropBottom = Math.floor(height * FALLBACK_CROP_RATIO);
     confidence = 0.35;
     rationale =
-      "No text detected in the top quartile — falling back to top 18% of the page.";
+      "No text detected in the top quartile. Falling back to top 18% of the page.";
   } else {
-    cropBottom = Math.min(
-      Math.ceil(cluster.bottomY + height * PADDING_RATIO),
-      Math.floor(height * MAX_LETTERHEAD_RATIO),
-    );
+    const paddedBottom = Math.ceil(cluster.bottomY + height * PADDING_RATIO);
+    const maxBottom = Math.floor(height * MAX_LETTERHEAD_RATIO);
+    cropBottom = Math.min(paddedBottom, maxBottom);
+
     confidence = scoreLetterhead(cluster.items, width);
     rationale = `Top text cluster spans ${cluster.items.length} item(s); cropped to y=${Math.round(
       cropBottom,
@@ -79,24 +81,28 @@ export async function extractLetterhead(
   }
 }
 
+// Each of these patterns adds a small confidence bump. They're tuned
+// for the kinds of tokens that show up in real letterheads.
 const HAS_URL = /\b(www\.|http|@|\.com|\.org|\.net)\b/;
-// Phone: matches (415) 555-0123, 415-555-0123, 415.555.0123, 415 555 0123.
-// Requires a separator between groups, so 10-digit account numbers don't false-positive.
+// Matches (415) 555-0123, 415-555-0123, 415.555.0123, 415 555 0123.
+// Requires a separator so we don't false-positive on 10-digit account numbers.
 const HAS_PHONE = /\(?\d{3}\)?[-.\s]\d{3}[-.\s]\d{4}/;
 const HAS_COMPANY_SUFFIX = /\b(inc|llc|ltd|corp|company|firm|group)\b/i;
 const HAS_ADDRESS_KEYWORD = /\b(street|st\.|ave|avenue|blvd|suite|ste)\b/i;
 
 /**
- * Score how letterhead-ish a text cluster looks. Pure function — testable.
+ * Score how letterhead-ish a text cluster looks.
  *
- * Base score 0.5; bumps for letterhead-tell signals (contact info, large
- * font, centering). Capped at 0.95.
+ * Pure function. Testable. Base score is 0.5; we bump it for each
+ * letterhead-tell signal. Capped at 0.95 so there's always a little
+ * headroom for the AI to push it higher.
  */
 export function scoreLetterhead(
   cluster: TextItem[],
   pageWidth: number,
 ): number {
   if (cluster.length === 0) return 0.3;
+
   let score = 0.5;
   const text = cluster.map((t) => t.str).join(" ");
 
@@ -105,10 +111,13 @@ export function scoreLetterhead(
   if (HAS_COMPANY_SUFFIX.test(text)) score += 0.05;
   if (HAS_ADDRESS_KEYWORD.test(text)) score += 0.05;
 
+  // Centered alignment is a strong letterhead signal.
   if (isHorizontallyCentered(cluster, pageWidth)) score += 0.1;
 
-  const avgHeight =
-    cluster.reduce((sum, t) => sum + t.height, 0) / cluster.length;
+  // Larger-than-body fonts usually mean a branded title or logo.
+  let avgHeight = 0;
+  for (const t of cluster) avgHeight += t.height;
+  avgHeight = avgHeight / cluster.length;
   if (avgHeight > 18) score += 0.05;
 
   return Math.min(0.95, score);

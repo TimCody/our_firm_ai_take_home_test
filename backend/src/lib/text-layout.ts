@@ -1,13 +1,14 @@
 /**
- * Pure helpers for reasoning about a page's text layer.
+ * Helpers for reasoning about a page's text layer.
  *
- * Everything here is data-in / data-out (no fs, no canvas) so it can be
- * unit-tested without spinning up pdfjs or rendering anything.
+ * Everything here is data in, data out. No filesystem, no canvas, no
+ * network. That makes the whole module easy to unit test without spinning
+ * up pdfjs or rendering anything.
  */
 import type { TextItem } from "../types.js";
 
 export interface TextLine {
-  /** Top-left Y of the line (pixel coords). */
+  /** Top-left Y of the line in pixel coords. */
   y: number;
   /** Height of the tallest glyph in the line. */
   height: number;
@@ -17,34 +18,46 @@ export interface TextLine {
 /**
  * Group text items into visual lines by Y coordinate proximity.
  *
- * Items whose y-positions differ by less than `tolerance` pixels are treated
- * as a single line. The result is ordered top-to-bottom.
+ * Items whose y-positions differ by less than `tolerance` pixels are
+ * treated as the same line. The result is ordered top-to-bottom.
  *
- * `tolerance` defaults to 4px — tuned for the page-render scale of 2×.
- * If you ever change the render scale, scale the tolerance too.
+ * Why a tolerance and not a strict y match: PDF descenders (the part of
+ * "g" or "y" that hangs below the baseline) often report a slightly
+ * different y than their neighbors on the same line. 4 pixels is enough
+ * to absorb that wobble at our 2x render scale. If you change the render
+ * scale, scale this value too.
  */
 export function groupIntoLines(
   items: TextItem[],
   tolerance = 4,
 ): TextLine[] {
   if (items.length === 0) return [];
+
+  // Sort top-to-bottom so we can walk once and group adjacent items.
   const sorted = [...items].sort((a, b) => a.y - b.y);
   const lines: TextLine[] = [];
 
   for (const item of sorted) {
     const last = lines[lines.length - 1];
-    if (last && Math.abs(item.y - last.y) <= tolerance) {
+    const sameLine =
+      last !== undefined && Math.abs(item.y - last.y) <= tolerance;
+
+    if (sameLine) {
       last.items.push(item);
-      last.height = Math.max(last.height, item.height);
+      if (item.height > last.height) {
+        last.height = item.height;
+      }
     } else {
       lines.push({ y: item.y, height: item.height, items: [item] });
     }
   }
+
   return lines;
 }
 
 /**
- * Concatenate the text content of a line (space-separated).
+ * Join the text content of a line into a single string, separated by
+ * spaces.
  */
 export function lineText(line: TextLine): string {
   return line.items.map((i) => i.str).join(" ");
@@ -55,19 +68,22 @@ export interface TopCluster {
   items: TextItem[];
   /** Y of the topmost item. */
   topY: number;
-  /** Y + height of the deepest item. */
+  /** Y of the bottom edge of the deepest item. */
   bottomY: number;
 }
 
 /**
- * Find the topmost cluster of text on a page — the candidate letterhead.
+ * Find the topmost cluster of text on a page. This is the candidate for
+ * the letterhead.
  *
- * Two-step:
+ * Two steps:
  *   1. Filter to items in the top quartile of the page.
- *   2. From those, take everything that lives within `clusterWindow` of
- *      the highest item. That's our cluster.
+ *   2. From those, take everything that lives within `clusterWindow`
+ *      (default 12% of page height) of the highest item. That's the
+ *      cluster.
  *
- * Returns null if there's no text in the top quartile.
+ * Returns null when there's no text in the top quartile (which is the
+ * case for image-only PDFs and posters).
  */
 export function findTopCluster(
   items: TextItem[],
@@ -78,34 +94,49 @@ export function findTopCluster(
   const topItems = items.filter((t) => t.y < topQuartile);
   if (topItems.length === 0) return null;
 
+  // The highest item anchors the cluster window.
   const sorted = [...topItems].sort((a, b) => a.y - b.y);
   const topY = sorted[0]!.y;
   const cutoff = topY + pageHeight * clusterWindow;
   const cluster = sorted.filter((t) => t.y < cutoff);
-  const bottomY = Math.max(...cluster.map((t) => t.y + t.height));
+
+  // Bottom edge = highest (y + height) across all cluster members.
+  let bottomY = 0;
+  for (const item of cluster) {
+    const itemBottom = item.y + item.height;
+    if (itemBottom > bottomY) bottomY = itemBottom;
+  }
 
   return { items: cluster, topY, bottomY };
 }
 
 /**
- * Compute the horizontal center of mass of a set of text items.
- * Useful for "is this cluster centered on the page?" scoring.
+ * Average horizontal center of a set of text items. Used to score
+ * whether a text cluster looks centered on the page (a strong letterhead
+ * signal).
  */
 export function averageCenterX(items: TextItem[]): number {
   if (items.length === 0) return 0;
-  const sum = items.reduce((acc, t) => acc + (t.x + t.width / 2), 0);
+  let sum = 0;
+  for (const t of items) {
+    sum += t.x + t.width / 2;
+  }
   return sum / items.length;
 }
 
 /**
  * True if the cluster's center sits within `tolerance` (as a fraction of
- * page width) of the page's vertical centerline.
+ * page width) of the page's vertical centerline. Default tolerance is
+ * 8%, which catches anything that looks visually centered without
+ * false-positive on left-aligned text that happens to be wide.
  */
 export function isHorizontallyCentered(
   items: TextItem[],
   pageWidth: number,
   tolerance = 0.08,
 ): boolean {
+  if (items.length === 0) return false;
   const center = averageCenterX(items);
-  return Math.abs(center - pageWidth / 2) < pageWidth * tolerance;
+  const pageMid = pageWidth / 2;
+  return Math.abs(center - pageMid) < pageWidth * tolerance;
 }

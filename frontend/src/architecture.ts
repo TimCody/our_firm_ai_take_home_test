@@ -1,10 +1,11 @@
 /**
  * Architecture diagram renderer.
  *
- * Pinned to the active preset and shown below the gallery. The diagram is
- * ASCII so it's robust to font-rendering quirks, copy-paste-able, and
- * obviously hand-drawn (which is the right tone — these are sketches of
- * how we'd actually build it, not auto-generated infra diagrams).
+ * Pinned to the active preset and shown below the gallery. The diagram
+ * is ASCII so it's robust to font-rendering quirks, easy to copy-paste,
+ * and obviously hand-drawn. That last part is the right tone: these
+ * are sketches of how we'd actually build it, not auto-generated
+ * cloud topology diagrams.
  */
 import type { Preset } from "./presets.js";
 

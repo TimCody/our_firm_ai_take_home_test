@@ -25,7 +25,7 @@ describe("computeImageTokens", () => {
 
 describe("estimateVisionCost", () => {
   it("returns a sensible estimate for a standard letter page (Haiku)", () => {
-    // 1224×1584 at 2x scale — a typical PDF page render
+    // 1224x1584 at 2x scale, a typical PDF page render.
     const estimate = estimateVisionCost({
       imageWidth: 1224,
       imageHeight: 1584,

@@ -1,18 +1,19 @@
 /**
- * Token + USD cost estimator for Anthropic vision calls.
+ * Token and USD cost estimator for Anthropic vision calls.
  *
- * We surface this in the UI before firing the AI fallback so the user
- * sees what they're about to spend. Estimates only — actual cost may differ
- * by a few percent based on how Anthropic resizes the image internally.
+ * We surface this in the UI before firing the AI fallback, so the user
+ * sees what they're about to spend. These are estimates only. Actual
+ * cost may differ by a few percent depending on how Anthropic resizes
+ * the image internally and how long the model's reply ends up being.
  *
- * Pricing as of 2026 (per million tokens):
- *   - Haiku 4.5: $1 input / $5 output
- *   - Sonnet 4.6: $3 input / $15 output
+ * Pricing (per million tokens, as of early 2026):
+ *   Haiku 4.5:  $1 input  / $5 output
+ *   Sonnet 4.6: $3 input  / $15 output
  *
- * Vision token formula (Anthropic-documented heuristic): roughly
- *   image_tokens ≈ (width × height) / 750
- * Anthropic caps the longest edge of resized images at 1568px, so we apply
- * the same cap before estimating.
+ * Vision token formula (per Anthropic's docs): roughly
+ *   image_tokens ~= (width * height) / 750
+ * Anthropic also caps the longest edge of resized images at 1568px,
+ * so we apply the same cap before counting tokens.
  */
 export type SupportedModel = "haiku" | "sonnet";
 
@@ -37,9 +38,9 @@ const MAX_EDGE_PX = 1568;
 export interface CostEstimateInput {
   imageWidth: number;
   imageHeight: number;
-  /** Approx prompt overhead in input tokens (system + instruction). */
+  /** Approximate prompt overhead in input tokens (system + instruction). */
   promptTokens?: number;
-  /** max_tokens we'll ask for. */
+  /** The max_tokens we'll ask for. */
   maxOutputTokens?: number;
   model?: SupportedModel;
 }
@@ -50,7 +51,10 @@ export interface CostEstimate {
   promptTokens: number;
   maxOutputTokens: number;
   inputTokens: number;
-  /** USD cost assuming output uses all `maxOutputTokens`. Upper bound. */
+  /**
+   * USD cost assuming output uses all `maxOutputTokens`. This is an
+   * upper bound. Reality is usually a bit less.
+   */
   estimatedUsd: number;
   /** Human-friendly cost string for UI display. */
   pretty: string;
@@ -68,6 +72,7 @@ export function estimateVisionCost(opts: CostEstimateInput): CostEstimate {
   const pricing = PRICING[model];
   const imageTokens = computeImageTokens(imageWidth, imageHeight);
   const inputTokens = imageTokens + promptTokens;
+
   const inputUsd = (inputTokens / 1_000_000) * pricing.inputPerMTok;
   const outputUsd = (maxOutputTokens / 1_000_000) * pricing.outputPerMTok;
   const estimatedUsd = inputUsd + outputUsd;
@@ -84,11 +89,12 @@ export function estimateVisionCost(opts: CostEstimateInput): CostEstimate {
 }
 
 /**
- * Anthropic resizes images so the longest edge is ≤1568px before pricing.
- * Apply the same downscale before counting tokens.
+ * Anthropic downscales images so the longest edge is at most 1568px
+ * before pricing. We mirror that downscale before counting tokens.
  */
 export function computeImageTokens(width: number, height: number): number {
   const longest = Math.max(width, height);
+
   let w = width;
   let h = height;
   if (longest > MAX_EDGE_PX) {
@@ -96,9 +102,14 @@ export function computeImageTokens(width: number, height: number): number {
     w = width * scale;
     h = height * scale;
   }
+
   return Math.ceil((w * h) / 750);
 }
 
+/**
+ * Pretty-print a USD value. Different precision based on magnitude
+ * because "$0.0041" reads better than "$0.00" for sub-cent costs.
+ */
 export function formatCost(usd: number): string {
   if (usd < 0.001) return "<$0.001";
   if (usd < 0.01) return `~$${usd.toFixed(4)}`;

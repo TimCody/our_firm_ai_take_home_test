@@ -1,12 +1,13 @@
 /**
- * Fixture generator — produces a labelled corpus of test documents in
+ * Fixture generator. Produces a labelled corpus of test documents in
  * samples/{easy,medium,hard,images,docx}/.
  *
  * Design goals:
- *   - Reproducible (no randomness; deterministic seeded variations)
- *   - Span the realistic difficulty spectrum (clean letter → garbage)
- *   - Each sample is *labelled* in samples/INDEX.json so we can later
- *     build a regression harness that scores extraction against ground truth
+ *   - Reproducible. No randomness; deterministic, seeded variations.
+ *   - Span the realistic difficulty spectrum (clean letter to garbage).
+ *   - Every sample is labelled in samples/INDEX.json so we can later
+ *     build a regression harness that scores extraction against
+ *     ground truth.
  *
  * Run: `npm run fixtures`
  */
@@ -288,7 +289,7 @@ const RECIPES: PdfRecipe[] = [
         title: "Chief Financial Officer",
         italicSignature: true,
       });
-      drawFooter(doc, "Northwind Trading Co. — Internal Use Only");
+      drawFooter(doc, "Northwind Trading Co. · Internal Use Only");
     },
   },
   {
@@ -394,7 +395,7 @@ const RECIPES: PdfRecipe[] = [
   {
     filename: "easy/08-bold-header.pdf",
     tier: "easy",
-    description: "Big bold header band — classic letterhead",
+    description: "Big bold header band. Classic letterhead.",
     expectations: { letterhead: true, footer: true, signature: true },
     draw: (doc) => {
       doc.rect(0, 0, doc.page.width, 84).fill("#1a1a2e");
@@ -435,7 +436,7 @@ const RECIPES: PdfRecipe[] = [
         typedName: "Hannah J. Kowalski",
         italicSignature: true,
       });
-      // No drawn footer — confirms our "footer absent" path
+      // No drawn footer. Confirms our "footer absent" path.
     },
   },
   {
@@ -469,7 +470,7 @@ const RECIPES: PdfRecipe[] = [
   {
     filename: "medium/01-no-signature.pdf",
     tier: "medium",
-    description: "Letterhead + footer, no signature — tests \"not detected\" path",
+    description: "Letterhead and footer, no signature. Tests the \"not detected\" path.",
     expectations: { letterhead: true, footer: true, signature: false },
     draw: (doc) => {
       drawLetterhead(doc, {
@@ -488,7 +489,7 @@ const RECIPES: PdfRecipe[] = [
     expectations: { letterhead: false, footer: true, signature: true },
     draw: (doc) => {
       doc.moveDown(2);
-      drawBody(doc, [`Statement of Work — Phase II`, FILLER[0]!, FILLER[1]!]);
+      drawBody(doc, [`Statement of Work: Phase II`, FILLER[0]!, FILLER[1]!]);
       drawSignOff(doc, {
         closing: "Signed,",
         typedName: "Anita Vasquez",
@@ -500,7 +501,7 @@ const RECIPES: PdfRecipe[] = [
   {
     filename: "medium/03-small-font.pdf",
     tier: "medium",
-    description: "Tiny body font, dense paragraphs — tests robustness to dense layouts",
+    description: "Tiny body font, dense paragraphs. Tests robustness to dense layouts.",
     expectations: { letterhead: true, footer: true, signature: true },
     draw: (doc) => {
       drawLetterhead(doc, {
@@ -523,7 +524,7 @@ const RECIPES: PdfRecipe[] = [
   {
     filename: "medium/04-rotated-text.pdf",
     tier: "medium",
-    description: "Side watermark + body text — letterhead and footer at normal positions",
+    description: "Side watermark plus body text. Letterhead and footer at normal positions.",
     expectations: { letterhead: true, footer: true, signature: true },
     draw: (doc) => {
       drawLetterhead(doc, {
@@ -551,7 +552,7 @@ const RECIPES: PdfRecipe[] = [
   {
     filename: "medium/05-three-pages.pdf",
     tier: "medium",
-    description: "Three-page document — signature only on last page, footer on every page",
+    description: "Three-page document. Signature only on the last page, footer on every page.",
     expectations: { letterhead: true, footer: true, signature: true },
     draw: (doc) => {
       drawLetterhead(doc, {
@@ -580,7 +581,7 @@ const RECIPES: PdfRecipe[] = [
   {
     filename: "medium/06-low-contrast.pdf",
     tier: "medium",
-    description: "Light-grey signature stroke — tests ink-density threshold",
+    description: "Light-grey signature stroke. Tests the ink-density threshold.",
     expectations: { letterhead: true, footer: true, signature: true },
     draw: (doc) => {
       drawLetterhead(doc, {
@@ -621,13 +622,13 @@ const RECIPES: PdfRecipe[] = [
       doc.moveDown(3);
       doc.fontSize(12).fillColor("#555555");
       doc.text("Tickets: gala2026.example", { align: "center" });
-      // No footer, no signature — exercise the "missing" UI
+      // No footer, no signature. Exercises the "missing" UI.
     },
   },
   {
     filename: "hard/02-jumbled-layout.pdf",
     tier: "hard",
-    description: "Three-column ish layout, footer-positioned legal text mid-page — adversarial",
+    description: "Three-column-ish layout with footer-positioned legal text mid-page. Adversarial.",
     expectations: { letterhead: true, footer: true, signature: true },
     draw: (doc) => {
       // Letterhead in lower-half ribbon to confuse our top-region heuristic
@@ -729,7 +730,7 @@ async function generateImages() {
   index.push({
     file: "images/letter-photo.png",
     tier: "image",
-    description: "PNG image of a letter — exercises image-input pipeline",
+    description: "PNG image of a letter. Exercises the image-input pipeline.",
     expectations: { letterhead: true, footer: true, signature: false },
   });
   console.log("  ✓ images/letter-photo.png");
@@ -741,7 +742,7 @@ async function generateImages() {
   index.push({
     file: "images/letter-photo.jpg",
     tier: "image",
-    description: "JPEG version of the letter — same content, lossy compression",
+    description: "JPEG version of the letter. Same content, lossy compression.",
     expectations: { letterhead: true, footer: true, signature: false },
   });
   console.log("  ✓ images/letter-photo.jpg");
@@ -841,7 +842,7 @@ async function main() {
 }
 
 /**
- * Build a PDF whose entire content is a single embedded image — no text
+ * Build a PDF whose entire content is a single embedded image, with no text
  * layer. Designed to showcase the "Improve with LLM" path:
  *   - Deterministic extractors return "not detected" for footer & signature
  *     (no text positions to anchor on); letterhead falls back to top-18%.
@@ -861,7 +862,7 @@ async function generateScannedPdf() {
     file: "medium/07-scanned-letter.pdf",
     tier: "medium",
     description:
-      "Image-only PDF (no text layer). Deterministic extractors return 'not detected' for footer & signature — click Improve with LLM to watch all three regions get located by Claude vision.",
+      "Image-only PDF (no text layer). Deterministic extractors return 'not detected' for footer and signature. Click Improve with LLM to watch all three regions get located by Claude vision.",
     expectations: { letterhead: true, footer: true, signature: true },
   });
   console.log("  ✓ medium/07-scanned-letter.pdf");
@@ -936,7 +937,7 @@ function buildSamplesReadme(): string {
 }
 
 function tick(b: boolean): string {
-  return b ? "✓" : "—";
+  return b ? "✓" : "-";
 }
 
 void main();

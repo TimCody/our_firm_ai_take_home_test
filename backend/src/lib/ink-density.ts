@@ -1,20 +1,22 @@
 /**
  * Ink-density analysis on rasterized page bands.
  *
- * Used by the signature extractor to find handwritten-looking dark streaks
- * that don't align with the page's text rows.
+ * Used by the signature extractor to find handwritten-looking dark
+ * streaks that don't align with the page's text rows.
  *
- * Pure-function pair: caller does the image extraction + grayscale conversion
- * with sharp, then hands us the raw byte array.
+ * This module is a pair of pure functions. The caller does the heavy
+ * lifting (extracting the image region and converting to grayscale with
+ * sharp); we just look at the raw byte array and decide where the ink
+ * lives.
  */
 
 /**
- * For each row of a grayscale buffer, compute the fraction of pixels below
- * `darkThreshold` (i.e. "how much ink lives in this row").
+ * For each row of a grayscale buffer, return the fraction of pixels
+ * darker than `darkThreshold`. Higher number = more ink in that row.
  *
- * The default threshold (140) treats anything darker than mid-grey as ink.
- * Lower it to 100 for high-contrast scans only; raise it to 180 if you
- * want to catch very light pencil signatures.
+ * The default threshold of 140 treats anything darker than mid-grey as
+ * ink. Lower it (around 100) for high-contrast scans only. Raise it
+ * (around 180) if you want to catch very light pencil signatures.
  */
 export function computeRowDarkness(
   grayData: Uint8Array,
@@ -23,33 +25,40 @@ export function computeRowDarkness(
   darkThreshold = 140,
 ): number[] {
   const rows: number[] = new Array(height).fill(0);
+
   for (let y = 0; y < height; y++) {
     let darkCount = 0;
     const rowStart = y * width;
+
     for (let x = 0; x < width; x++) {
-      const v = grayData[rowStart + x];
-      if (v !== undefined && v < darkThreshold) darkCount++;
+      const pixel = grayData[rowStart + x];
+      if (pixel !== undefined && pixel < darkThreshold) {
+        darkCount++;
+      }
     }
+
     rows[y] = darkCount / width;
   }
+
   return rows;
 }
 
 export interface DarkRun {
   start: number;
   end: number;
-  /** Sum of row densities across the run — higher means denser. */
+  /** Sum of row densities across the run. Higher = denser. */
   score: number;
 }
 
 /**
  * Find the densest contiguous run of rows above `minDensity` that's at
- * least `minLength` rows tall.
+ * least `minLength` rows tall. Returns null when nothing qualifies.
  *
- * Returns null if no run qualifies.
- *
- * Used to locate signature-shaped streaks: signatures show up as a few
- * dozen rows of moderately-dark pixels, narrower than a paragraph block.
+ * The "minimum length" check matters: a single dark row is noise (a
+ * stray glyph descender, a page border). A run of 12+ rows is a real
+ * horizontal feature on the page. For our 2x render scale, that's
+ * about a 6-pixel band in original PDF coordinates, which roughly
+ * matches the height of a handwritten signature stroke.
  */
 export function findDensestDarkRun(
   rowDarkness: number[],
@@ -60,6 +69,8 @@ export function findDensestDarkRun(
   let runStart = -1;
   let runSum = 0;
 
+  // Walk one past the end so we close out any run that extends to the
+  // final row.
   for (let y = 0; y <= rowDarkness.length; y++) {
     const v = rowDarkness[y];
     const isDark = v !== undefined && v > minDensity;
@@ -71,12 +82,16 @@ export function findDensestDarkRun(
       }
       runSum += v;
     } else if (runStart !== -1) {
+      // Run just ended. Check if it qualifies and beats the current best.
       const length = y - runStart;
-      if (length >= minLength && (!best || runSum > best.score)) {
+      const qualifies = length >= minLength;
+      const isBest = best === null || runSum > best.score;
+      if (qualifies && isBest) {
         best = { start: runStart, end: y, score: runSum };
       }
       runStart = -1;
     }
   }
+
   return best;
 }

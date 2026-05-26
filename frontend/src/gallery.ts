@@ -1,8 +1,15 @@
 /**
- * Gallery rendering: thumbnail strip + prev/next nav + active-doc rendering.
+ * Gallery rendering: thumbnail strip, prev/next nav, and the active
+ * document's preview + regions + AI panel.
  *
- * Keeps DOM updates idempotent — call `renderGallery(state)` whenever
- * something interesting changes and it'll diff the active doc into place.
+ * Render is idempotent. Call `renderGallery(state)` whenever something
+ * interesting changes; this module diffs the active doc into place.
+ *
+ * Memoization is important here. We're called on every state update,
+ * and re-rendering the PDF preview on every keystroke would flash the
+ * canvas. So preview and regions both cache their last-rendered key
+ * on the container's `dataset`, and bail out when the key hasn't
+ * changed. See `previewCacheKey` and `regionsCacheKey` below.
  */
 import { buildRegionCard } from "./region-card.js";
 import { buildAiPanel } from "./ai-panel.js";
@@ -44,7 +51,8 @@ export function renderGallery(
 
   renderStrip(refs.galleryStrip, state, handlers);
 
-  const active = state.docs.find((d) => d.id === state.activeId) ?? state.docs[0];
+  const active =
+    state.docs.find((d) => d.id === state.activeId) ?? state.docs[0];
   if (!active) return;
 
   renderNav(refs, state, active, handlers);
@@ -57,6 +65,9 @@ function renderStrip(
   handlers: GalleryHandlers,
 ): void {
   container.innerHTML = "";
+
+  const preset = getPreset(state.presetId);
+
   for (const doc of state.docs) {
     const thumb = document.createElement("button");
     thumb.type = "button";
@@ -73,8 +84,13 @@ function renderStrip(
       thumb.appendChild(img);
     }
 
-    const preset = getPreset(state.presetId);
-    if (doc.result && hasFlaggedRegion(doc, preset.context.confidenceThreshold)) {
+    // Show a small flagged pip when any of this doc's regions falls
+    // below the active preset's HITL threshold. Quick at-a-glance
+    // signal across the whole upload batch.
+    if (
+      doc.result &&
+      hasFlaggedRegion(doc, preset.context.confidenceThreshold)
+    ) {
       const pip = document.createElement("span");
       pip.className = "flagged-pip";
       pip.title = `At least one region below the ${preset.title} threshold`;
@@ -92,9 +108,11 @@ function renderStrip(
 
 function hasFlaggedRegion(doc: DocState, threshold: number): boolean {
   if (!doc.result) return false;
-  return Object.values(doc.result.regions).some(
-    (r) => !r.detected || r.confidence < threshold,
-  );
+  for (const region of Object.values(doc.result.regions)) {
+    if (!region.detected) return true;
+    if (region.confidence < threshold) return true;
+  }
+  return false;
 }
 
 function renderNav(
@@ -120,6 +138,7 @@ function renderActive(
   handlers: GalleryHandlers,
 ): void {
   const preset = getPreset(state.presetId);
+
   void renderActivePreview(refs.previewContainer, active);
   renderActiveRegions(
     refs.regionsContainer,
@@ -133,12 +152,12 @@ function renderActive(
 }
 
 /**
- * Memoize the preview by document id. Without this, every state update
- * (e.g. a sibling doc finishing extraction) would re-run pdfjs and visibly
- * flash the canvas.
+ * Memoize the preview by document id. Without this, every state
+ * update (e.g. a sibling doc finishing extraction) would re-run pdfjs
+ * and visibly flash the canvas.
  *
  * For non-PDF inputs we only render after the server returns the page
- * previews — so we also key on whether previews are present yet.
+ * previews, so we also key on whether previews are present yet.
  */
 async function renderActivePreview(
   container: HTMLElement,
@@ -149,12 +168,12 @@ async function renderActivePreview(
   container.dataset.previewKey = previewKey;
   container.innerHTML = "";
 
+  // For PDFs the client-side preview kicks in immediately. For other
+  // types we wait for server-side previews, so show a placeholder.
   if (doc.status === "extracting" && doc.file.type !== "application/pdf") {
-    // For PDFs the client-side preview kicks in immediately. For other
-    // types we wait for server-side previews — show a placeholder.
     const note = document.createElement("p");
     note.className = "rationale";
-    note.textContent = "Rendering preview & extracting regions…";
+    note.textContent = "Rendering preview & extracting regions...";
     container.appendChild(note);
     return;
   }
@@ -176,10 +195,10 @@ async function renderActivePreview(
 }
 
 function previewCacheKey(doc: DocState): string {
-  // For PDFs the preview is purely client-side, so doc id is enough.
-  // For non-PDFs we need to wait for the server to return previews, so we
-  // include "has-previews" in the key.
+  // PDFs render client-side, so doc id alone is enough to key off.
   if (doc.file.type === "application/pdf") return `pdf:${doc.id}`;
+  // Non-PDFs need the server's page previews. Include "ready" once
+  // those are available so the placeholder re-renders into real content.
   return `other:${doc.id}:${doc.result ? "ready" : "pending"}`;
 }
 
@@ -188,9 +207,9 @@ function renderActiveRegions(
   doc: DocState,
   hitlThreshold: number,
 ): void {
-  // Cheap memoization: same doc + same threshold + same result version =
-  // skip the rebuild. Without this we'd flash the cards every time a
-  // sibling doc finishes extracting.
+  // Cheap memoization for the regions panel. Without this we'd flash
+  // the cards on every state update (e.g. each time a sibling doc
+  // finishes extracting).
   const key = `${doc.id}:${doc.status}:${doc.result ? "ready" : "none"}:${
     doc.result?.usedAiFallback ? "ai" : "noai"
   }:${hitlThreshold}`;
@@ -198,6 +217,7 @@ function renderActiveRegions(
   container.dataset.regionsKey = key;
 
   container.innerHTML = "";
+
   if (doc.status === "error") {
     const err = document.createElement("p");
     err.className = "rationale";
@@ -209,7 +229,7 @@ function renderActiveRegions(
   if (!doc.result) {
     const wait = document.createElement("p");
     wait.className = "rationale";
-    wait.textContent = "Extracting…";
+    wait.textContent = "Extracting...";
     container.appendChild(wait);
     return;
   }
@@ -246,6 +266,7 @@ function renderActiveMeta(container: HTMLElement, doc: DocState): void {
     container.textContent = "";
     return;
   }
+
   const r = doc.result;
   const parts: string[] = [
     `${r.pageCount} page${r.pageCount === 1 ? "" : "s"}`,
@@ -253,6 +274,7 @@ function renderActiveMeta(container: HTMLElement, doc: DocState): void {
   ];
   if (r.usedAiFallback) parts.push("AI fallback used");
   if (r.warnings.length > 0) parts.push("⚠ " + r.warnings.join("; "));
+
   container.textContent = parts.join("  ·  ");
   container.className = r.warnings.length > 0 ? "meta warning" : "meta";
 }

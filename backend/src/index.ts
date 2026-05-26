@@ -1,4 +1,5 @@
-// MUST be first — populates process.env before any other module loads.
+// Must be the first import. Populates process.env before any other
+// module evaluates (some modules read env vars at module-load time).
 import "./load-env.js";
 import { createServer } from "./server.js";
 

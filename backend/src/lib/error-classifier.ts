@@ -1,20 +1,23 @@
 /**
  * Maps any thrown error to an HTTP status + user-facing message.
  *
- * Pure function — takes an error in, returns a verdict. Keeps the route
- * handler short and makes every error path testable without spinning up
- * Express. The brief calls out "unsupported files, corrupt documents" as
- * specific cases the system has to handle gracefully; this is where each
- * library's failure modes get translated into something users can act on.
+ * This is a pure function. Error in, verdict out. Keeping it pure
+ * keeps the route handler short and makes every error path testable
+ * without spinning up Express.
  *
- * Layout (matched in this order):
+ * The brief calls out "unsupported files, corrupt documents" as
+ * specific cases the system has to handle gracefully. This module is
+ * where each library's failure modes get translated into something
+ * the user can actually act on.
+ *
+ * Order of checks (first match wins):
  *   1. Multer upload-layer errors (file too big, bad form)
  *   2. Empty file
  *   3. Our own throws ("Unsupported file type", "dimensions")
- *   4. pdfjs errors (by class name first, then message regex)
+ *   4. pdfjs errors (by class name first, then by message regex)
  *   5. mammoth (DOCX) errors
  *   6. sharp (image) errors
- *   7. Fallback → 500 with the raw message
+ *   7. Fallback: 500 with the raw message
  */
 
 export interface ErrorVerdict {
@@ -23,8 +26,8 @@ export interface ErrorVerdict {
 }
 
 /**
- * Minimal multer-error shape — avoids importing multer's types just to read
- * the discriminating `code` field at runtime.
+ * Minimal multer error shape. We read `code` at runtime to discriminate;
+ * we don't import multer's types just for this.
  */
 interface MulterLikeError {
   name?: string;
@@ -37,6 +40,7 @@ export function classifyError(err: unknown, maxBytes: number): ErrorVerdict {
     return { status: 500, message: "Unknown server error." };
   }
 
+  // Multer rejections (these arrive as Error subclasses with a `code` field).
   const multerCode = (err as MulterLikeError).code;
   if (multerCode === "LIMIT_FILE_SIZE") {
     return {
@@ -66,7 +70,7 @@ export function classifyError(err: unknown, maxBytes: number): ErrorVerdict {
     };
   }
 
-  // pdfjs errors — class names are stable across versions.
+  // pdfjs errors. Their class names are stable across versions.
   if (err.name === "PasswordException" || lower.includes("password")) {
     return {
       status: 422,
@@ -84,7 +88,8 @@ export function classifyError(err: unknown, maxBytes: number): ErrorVerdict {
     };
   }
 
-  // mammoth throws JSZip errors on bad DOCX (the format is a zip).
+  // mammoth uses JSZip under the hood. A corrupt DOCX (or a non-zip
+  // file mislabeled as DOCX) throws errors from the zip layer.
   if (
     /end of central directory|can't find end of central directory|not a (?:valid )?zip/i.test(
       msg,
@@ -96,7 +101,7 @@ export function classifyError(err: unknown, maxBytes: number): ErrorVerdict {
     };
   }
 
-  // sharp errors on unsupported / truncated images.
+  // sharp errors on unsupported or truncated images.
   if (
     /input file.+(missing|unsupported|truncated)|unsupported image format|vips_image_pio_input/i.test(
       msg,

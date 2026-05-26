@@ -3,25 +3,27 @@ import type { ExtractionResult, RegionResult } from "../types.js";
 import { bufferToDataUrl } from "./crop.js";
 
 /**
- * Image input handling.
+ * Image input handling (PNG, JPEG).
  *
- * Treat the uploaded image as a single "page" and slice it the same way
- * we'd slice a PDF page:
+ * We treat the uploaded image as a single "page" and slice it the same
+ * way we'd slice a PDF page:
  *   - letterhead = top 18%
  *   - footer     = bottom 15%
- *   - signature  = NOT attempted from raw images (no text layer to consult
- *                  and ink-density alone is too unreliable on photos).
- *                  This is documented in the README as a deliberate MVP cut.
+ *   - signature  = not attempted
+ *
+ * Signature is skipped on raw images because there's no text layer to
+ * anchor on, and ink-density alone is too unreliable on real photos
+ * (compression artifacts, JPEG noise, color cast). Documented in the
+ * README as a deliberate MVP cut.
  */
 export async function extractFromImage(
   buffer: Buffer,
   fileName: string,
   mimeType: string,
 ): Promise<ExtractionResult> {
-  const normalized = await sharp(buffer)
-    .rotate() // honour EXIF orientation
-    .png()
-    .toBuffer();
+  // .rotate() applies EXIF orientation so portrait photos taken on a
+  // phone don't come in sideways.
+  const normalized = await sharp(buffer).rotate().png().toBuffer();
 
   const meta = await sharp(normalized).metadata();
   const width = meta.width ?? 0;
@@ -56,6 +58,7 @@ export async function extractFromImage(
     width,
     height: letterheadHeight,
   };
+
   const footer: RegionResult = {
     kind: "footer",
     detected: true,
@@ -66,6 +69,7 @@ export async function extractFromImage(
     width,
     height: footerHeight,
   };
+
   const signature: RegionResult = {
     kind: "signature",
     detected: false,
@@ -73,7 +77,7 @@ export async function extractFromImage(
     confidence: 0,
     page: null,
     rationale:
-      "Signature extraction from raw images is not attempted in MVP — no text layer to anchor the search.",
+      "Signature extraction from raw images is not attempted in MVP. No text layer to anchor the search.",
     width: null,
     height: null,
   };

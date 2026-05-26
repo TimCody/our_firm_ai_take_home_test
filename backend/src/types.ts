@@ -5,13 +5,13 @@ export interface RegionResult {
   detected: boolean;
   /** PNG buffer encoded as base64 data URL, or null if not detected. */
   imageDataUrl: string | null;
-  /** Confidence 0..1 — heuristic, not calibrated. */
+  /** Confidence 0..1. Heuristic, not calibrated. */
   confidence: number;
   /** Page number the region was found on (1-indexed). null when not detected. */
   page: number | null;
   /** Free-form explanation of how this region was located, surfaced in the UI. */
   rationale: string;
-  /** Width × height of the cropped region in pixels. */
+  /** Width and height of the cropped region in pixels. */
   width: number | null;
   height: number | null;
 }
