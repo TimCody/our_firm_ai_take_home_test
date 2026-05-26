@@ -19,7 +19,7 @@ Each fixture is labelled with expected regions so a regression harness can score
 | `easy/09-cover-letter.pdf` | ✓ | — | ✓ | Personal cover letter (no company brand, just name/address as letterhead) |
 | `easy/10-classic-letter.pdf` | ✓ | ✓ | ✓ | Classic business letter, all three regions present and clean |
 
-## medium (6)
+## medium (7)
 
 | File | Letterhead | Footer | Signature | Notes |
 |---|---|---|---|---|
@@ -29,6 +29,7 @@ Each fixture is labelled with expected regions so a regression harness can score
 | `medium/04-rotated-text.pdf` | ✓ | ✓ | ✓ | Side watermark + body text — letterhead and footer at normal positions |
 | `medium/05-three-pages.pdf` | ✓ | ✓ | ✓ | Three-page document — signature only on last page, footer on every page |
 | `medium/06-low-contrast.pdf` | ✓ | ✓ | ✓ | Light-grey signature stroke — tests ink-density threshold |
+| `medium/07-scanned-letter.pdf` | ✓ | ✓ | ✓ | Image-only PDF (no text layer). Deterministic extractors return 'not detected' for footer & signature — click Improve with LLM to watch all three regions get located by Claude vision. |
 
 ## hard (2)
 

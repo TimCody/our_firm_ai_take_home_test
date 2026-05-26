@@ -6,7 +6,7 @@ import {
   extractSignature,
   SIGNATURE_AI_FALLBACK_THRESHOLD,
 } from "./signature.js";
-import { aiLocateSignature } from "./ai-fallback.js";
+import { aiLocateRegions } from "./ai-fallback.js";
 import { extractFromDocx } from "./docx.js";
 import { extractFromImage } from "./image.js";
 import { bufferToDataUrl } from "./crop.js";
@@ -66,33 +66,33 @@ async function extractFromPdf(
 
   const middleSample = await renderMiddleSample(pdf, pageCount);
 
-  const letterhead = await extractLetterhead(firstPage);
-  const footer = await extractFooter(lastPage, {
+  let letterhead = await extractLetterhead(firstPage);
+  let footer = await extractFooter(lastPage, {
     allPages: middleSample
       ? [firstPage, middleSample, lastPage]
       : [firstPage, lastPage],
   });
-
   let signature: RegionResult = await extractSignature(lastPage);
+
   let usedAiFallback = false;
   if (shouldRunAi(aiMode, signature.confidence)) {
-    const aiResult = await aiLocateSignature(lastPage);
-    if (aiResult) {
-      // The fact that AI ran is itself useful UX information — flip the
-      // flag whenever we got an AI verdict back, not only when we adopted
-      // it. This is what makes the "AI" badge appear and gives the user
-      // visible feedback that their click did something.
+    const aiResults = await aiLocateRegions(lastPage);
+    if (aiResults) {
+      // AI ran — flip the flag so the UI shows the "AI" badge and the
+      // user gets visible feedback that their click did something.
       usedAiFallback = true;
 
-      if (shouldPreferAi(signature, aiResult)) {
-        signature = aiResult;
-      } else {
-        // AI was consulted and agreed (or was equal/lower confidence).
-        // Annotate the rationale so the user sees that something changed.
-        signature = {
-          ...signature,
-          rationale: appendAiAgreement(signature, aiResult),
-        };
+      if (aiResults.signature) {
+        signature = reconcile(signature, aiResults.signature);
+      }
+      if (aiResults.footer) {
+        footer = reconcile(footer, aiResults.footer);
+      }
+      // Letterhead lives on the FIRST page. AI only saw the last page, so
+      // its letterhead verdict is only valid for single-page docs (where
+      // firstPage === lastPage).
+      if (pageCount === 1 && aiResults.letterhead) {
+        letterhead = reconcile(letterhead, aiResults.letterhead);
       }
     }
   }
@@ -124,17 +124,30 @@ function shouldRunAi(mode: AiMode, deterministicConfidence: number): boolean {
   return deterministicConfidence < SIGNATURE_AI_FALLBACK_THRESHOLD;
 }
 
+/**
+ * Reconcile a deterministic verdict with an AI verdict for the same region.
+ *
+ * Three cases:
+ *   1. AI found something we missed (or with higher confidence) → use AI.
+ *   2. AI confidently confirms ABSENCE that we also said wasn't there →
+ *      use AI's higher-confidence verdict + rationale.
+ *   3. Anything else → keep deterministic but annotate the rationale so
+ *      the user sees the click actually did something.
+ */
+function reconcile(deterministic: RegionResult, ai: RegionResult): RegionResult {
+  if (shouldPreferAi(deterministic, ai)) return ai;
+  return {
+    ...deterministic,
+    rationale: appendAiAgreement(deterministic, ai),
+  };
+}
+
 function shouldPreferAi(
   deterministic: RegionResult,
   ai: RegionResult,
 ): boolean {
-  // AI found something we missed — always prefer.
   if (!deterministic.detected && ai.detected) return true;
-  // AI located the same region with higher confidence — prefer.
   if (ai.detected && ai.confidence > deterministic.confidence) return true;
-  // Both agree there's no signature, but AI is more confident in the
-  // absence verdict. Adopt AI's rationale so the user sees vision was
-  // consulted (e.g. "Claude saw no signature on the last page").
   if (
     !deterministic.detected &&
     !ai.detected &&
@@ -145,17 +158,14 @@ function shouldPreferAi(
   return false;
 }
 
-/**
- * When AI was consulted but we kept the deterministic crop, append a
- * one-liner to the rationale so the user sees that AI actually ran.
- */
 function appendAiAgreement(
   deterministic: RegionResult,
   ai: RegionResult,
 ): string {
+  const kind = deterministic.kind;
   const verdict = ai.detected
-    ? `agreed a signature is present (Claude conf ${(ai.confidence * 100).toFixed(0)}%)`
-    : `also found no signature (Claude conf ${(ai.confidence * 100).toFixed(0)}%)`;
+    ? `agreed a ${kind} is present (Claude conf ${(ai.confidence * 100).toFixed(0)}%)`
+    : `also found no ${kind} (Claude conf ${(ai.confidence * 100).toFixed(0)}%)`;
   return `${deterministic.rationale} · Claude vision (Haiku) ${verdict}.`;
 }
 
@@ -198,11 +208,14 @@ async function renderPreviews(
 }
 
 function buildCostEstimate(lastPage: PageRender): AiCostEstimate {
+  // Three-region prompt (letterhead + footer + signature) is a touch
+  // longer than the old signature-only prompt and outputs a larger JSON,
+  // so we bump both budgets. Still pennies — Haiku 4.5 keeps it cheap.
   const e = estimateVisionCost({
     imageWidth: lastPage.width,
     imageHeight: lastPage.height,
-    promptTokens: 200,
-    maxOutputTokens: 256,
+    promptTokens: 280,
+    maxOutputTokens: 500,
     model: "haiku",
   });
   return {

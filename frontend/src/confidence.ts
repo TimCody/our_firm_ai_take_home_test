@@ -12,8 +12,14 @@ export function buildConfidenceBar(value: number, detected: boolean): HTMLElemen
   const bar = document.createElement("div");
   bar.className = "confidence-bar";
   const fill = document.createElement("div");
-  fill.className = "confidence-bar-fill " + confidenceTier(value);
-  fill.style.width = `${Math.max(0, Math.min(100, value * 100))}%`;
+  // Empty bar when not detected — the "confidence" then describes
+  // certainty-of-absence, which is a different signal from "certainty of
+  // detection." Painting it as a growing colored bar would conflict with
+  // the "not detected" text label and confuse the user.
+  const widthPct = detected ? Math.max(0, Math.min(100, value * 100)) : 0;
+  fill.className =
+    "confidence-bar-fill " + (detected ? confidenceTier(value) : "low");
+  fill.style.width = `${widthPct}%`;
   bar.appendChild(fill);
   row.appendChild(bar);
 

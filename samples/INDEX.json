@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-05-25T13:55:29.578Z",
+  "generatedAt": "2026-05-26T13:45:07.676Z",
   "fixtures": [
     {
       "file": "easy/01-clean-letter.pdf",
@@ -175,6 +175,16 @@
       "file": "hard/02-jumbled-layout.pdf",
       "tier": "hard",
       "description": "Three-column ish layout, footer-positioned legal text mid-page — adversarial",
+      "expectations": {
+        "letterhead": true,
+        "footer": true,
+        "signature": true
+      }
+    },
+    {
+      "file": "medium/07-scanned-letter.pdf",
+      "tier": "medium",
+      "description": "Image-only PDF (no text layer). Deterministic extractors return 'not detected' for footer & signature — click Improve with LLM to watch all three regions get located by Claude vision.",
       "expectations": {
         "letterhead": true,
         "footer": true,

@@ -829,6 +829,7 @@ async function main() {
   console.log("Generating fixtures →", OUT);
   await ensureDir(OUT);
   await generatePdfs();
+  await generateScannedPdf();
   await generateImages();
   await generateDocx();
   await writeFile(
@@ -837,6 +838,80 @@ async function main() {
   );
   await writeFile(join(OUT, "README.md"), buildSamplesReadme());
   console.log(`Done. ${index.length} fixtures written.`);
+}
+
+/**
+ * Build a PDF whose entire content is a single embedded image — no text
+ * layer. Designed to showcase the "Improve with LLM" path:
+ *   - Deterministic extractors return "not detected" for footer & signature
+ *     (no text positions to anchor on); letterhead falls back to top-18%.
+ *   - Clicking Improve with LLM sends the page to Claude Haiku, which sees
+ *     the rasterized pixels directly and locates all three regions.
+ *
+ * Mirrors the real-world "scanned PDF" case the brief calls out as a
+ * robustness category.
+ */
+async function generateScannedPdf() {
+  const outDir = join(OUT, "medium");
+  await ensureDir(outDir);
+  const outPath = join(outDir, "07-scanned-letter.pdf");
+  const buf = await buildScannedLetterPdf();
+  await writeFile(outPath, buf);
+  index.push({
+    file: "medium/07-scanned-letter.pdf",
+    tier: "medium",
+    description:
+      "Image-only PDF (no text layer). Deterministic extractors return 'not detected' for footer & signature — click Improve with LLM to watch all three regions get located by Claude vision.",
+    expectations: { letterhead: true, footer: true, signature: true },
+  });
+  console.log("  ✓ medium/07-scanned-letter.pdf");
+}
+
+async function buildScannedLetterPdf(): Promise<Buffer> {
+  // Render the letter to a single PNG via SVG, then embed it in a PDF.
+  // Using SVG → sharp keeps us consistent with how the image fixtures are
+  // generated; @napi-rs/canvas would also work but adds a dependency the
+  // scripts workspace doesn't currently use.
+  const w = 1240;
+  const h = 1600;
+  const svg = `
+    <svg width="${w}" height="${h}" xmlns="http://www.w3.org/2000/svg">
+      <rect width="${w}" height="${h}" fill="#ffffff"/>
+      <rect x="0" y="0" width="${w}" height="200" fill="#1a3a6f"/>
+      <text x="${w / 2}" y="105" font-family="Helvetica" font-size="44" font-weight="bold"
+        fill="white" text-anchor="middle">ASHFORD LEGAL GROUP</text>
+      <text x="${w / 2}" y="160" font-family="Helvetica" font-size="22"
+        fill="#cfd9ee" text-anchor="middle">Attorneys at Law · 200 Wall Street, New York, NY 10005</text>
+      <text x="120" y="290" font-family="Helvetica" font-size="20" fill="#222">May 26, 2026</text>
+      <text x="120" y="350" font-family="Helvetica" font-size="20" fill="#222">Dear Mr. Henderson,</text>
+      <text x="120" y="410" font-family="Helvetica" font-size="18" fill="#444">Following our recent meeting, please find enclosed the executed settlement</text>
+      <text x="120" y="440" font-family="Helvetica" font-size="18" fill="#444">agreement and supporting exhibits. All parties have signed in accordance</text>
+      <text x="120" y="470" font-family="Helvetica" font-size="18" fill="#444">with the terms we discussed. The matter is now closed.</text>
+      <text x="120" y="620" font-family="Helvetica" font-size="20" fill="#222">Sincerely,</text>
+      <path d="M 120,740 C 160,690 200,790 245,730 C 290,670 335,780 380,720 C 420,680 465,770 510,730"
+        stroke="#0a1f5c" stroke-width="2.5" fill="none"/>
+      <path d="M 360,750 C 395,800 430,790 470,740"
+        stroke="#0a1f5c" stroke-width="2.5" fill="none"/>
+      <text x="120" y="810" font-family="Helvetica" font-style="italic" font-size="26" fill="#0a1f5c">Patricia Ashford, Esq.</text>
+      <text x="120" y="840" font-family="Helvetica" font-size="16" fill="#666">Senior Partner</text>
+      <rect x="0" y="${h - 90}" width="${w}" height="90" fill="#1a3a6f"/>
+      <text x="${w / 2}" y="${h - 35}" font-family="Helvetica" font-size="16"
+        fill="#ffffff" text-anchor="middle">© 2026 Ashford Legal Group · ashford-legal.example · (212) 555-0142</text>
+    </svg>
+  `;
+  const pngBuffer = await sharp(Buffer.from(svg)).png().toBuffer();
+
+  return await new Promise<Buffer>((resolve, reject) => {
+    const doc = new PDFDocument({ size: "LETTER", margin: 0 });
+    const chunks: Buffer[] = [];
+    doc.on("data", (c) => chunks.push(c));
+    doc.on("end", () => resolve(Buffer.concat(chunks)));
+    doc.on("error", reject);
+    doc.image(pngBuffer, 0, 0, {
+      fit: [doc.page.width, doc.page.height],
+    });
+    doc.end();
+  });
 }
 
 function buildSamplesReadme(): string {

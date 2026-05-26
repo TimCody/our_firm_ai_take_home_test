@@ -80,7 +80,9 @@ export async function extractLetterhead(
 }
 
 const HAS_URL = /\b(www\.|http|@|\.com|\.org|\.net)\b/;
-const HAS_PHONE = /\b\d{3}[-.\s]\d{3}[-.\s]\d{4}\b/;
+// Phone: matches (415) 555-0123, 415-555-0123, 415.555.0123, 415 555 0123.
+// Requires a separator between groups, so 10-digit account numbers don't false-positive.
+const HAS_PHONE = /\(?\d{3}\)?[-.\s]\d{3}[-.\s]\d{4}/;
 const HAS_COMPANY_SUFFIX = /\b(inc|llc|ltd|corp|company|firm|group)\b/i;
 const HAS_ADDRESS_KEYWORD = /\b(street|st\.|ave|avenue|blvd|suite|ste)\b/i;
 

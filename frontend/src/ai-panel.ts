@@ -34,7 +34,7 @@ function buildHeader(doc: DocState): HTMLElement {
   const h3 = document.createElement("h3");
   h3.textContent = doc.result?.usedAiFallback
     ? "AI vision already applied"
-    : "Improve signature with AI";
+    : "Improve regions with AI";
   return h3;
 }
 
@@ -42,10 +42,10 @@ function buildDescription(doc: DocState): HTMLElement {
   const p = document.createElement("p");
   if (doc.result?.usedAiFallback) {
     p.textContent =
-      "Claude Haiku 4.5 has already located the signature on this document. Re-run to try again.";
+      "Claude Haiku 4.5 has already located the regions on this document. Re-run to try again.";
   } else {
     p.textContent =
-      "Send the last page to Claude Haiku 4.5 to locate the signature. Useful when the deterministic heuristics miss or low-confidence the region. Cost preview below.";
+      "Send the last page to Claude Haiku 4.5 to locate the signature and footer (plus letterhead on single-page docs). Best when deterministic extractors miss or low-confidence a region — most dramatic on scanned/image-only PDFs. Cost preview below.";
   }
   return p;
 }
@@ -87,7 +87,7 @@ function buildButton(opts: AiPanelOptions): HTMLElement {
   } else if (doc.result?.usedAiFallback) {
     btn.textContent = "Re-run AI vision";
   } else {
-    btn.textContent = "Improve with LLM";
+    btn.textContent = "Improve regions with LLM";
   }
   btn.addEventListener("click", onImprove);
   return btn;

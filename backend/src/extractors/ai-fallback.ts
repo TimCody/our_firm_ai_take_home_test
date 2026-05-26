@@ -1,29 +1,37 @@
 import Anthropic from "@anthropic-ai/sdk";
-import type { PageRender, RegionResult } from "../types.js";
+import type { PageRender, RegionKind, RegionResult } from "../types.js";
 import { bufferToDataUrl, cropPng } from "./crop.js";
 import { extractJsonObject } from "../lib/json-parse.js";
 
 /**
- * Claude vision fallback for signature location.
+ * Claude vision improvement step.
  *
- * Model + scope discipline:
- *   - Uses Haiku 4.5 (the cheap+fast tier). This is a bbox-location task,
- *     not a reasoning task — Sonnet's extra cost buys nothing here.
- *   - Sends the ENTIRE last page (not a pre-cropped band). The whole point
- *     of the fallback is to catch cases geometry missed; constraining it to
- *     the same band geometry already failed in just narrows the blind spot.
- *   - We ask Claude for normalized [0..1] bbox coords and re-project to
- *     pixel coords on our side. Models are noticeably better at "0.3 down
- *     from the top" than at "y=487 pixels."
+ * One Bedrock call per "Improve with LLM" click. We send the last page and
+ * ask Claude to locate all three regions in one response — that's roughly
+ * the same image-token cost as a signature-only call but produces three
+ * verdicts at once. For scanned/image-only PDFs (no text layer) this is
+ * the difference between "all three not detected" and "all three located."
  *
- * If anything goes wrong (no key, API error, malformed response), we return
- * null so the caller keeps the deterministic result rather than 500ing.
+ * Cost discipline still applies:
+ *   - Haiku 4.5, not Sonnet — this is a location task, not reasoning.
+ *   - One image, one call. Letterhead is only useful when the page we sent
+ *     IS the first page (single-page docs) — caller decides whether to
+ *     apply that verdict based on pageCount.
+ *
+ * Failure modes (no key, network, malformed JSON) return null so the
+ * caller keeps the deterministic result rather than 500-ing.
  */
 const AI_MODEL = "claude-haiku-4-5-20251001";
 
-export async function aiLocateSignature(
-  lastPage: PageRender,
-): Promise<RegionResult | null> {
+export interface AiRegionVerdicts {
+  letterhead?: RegionResult;
+  footer?: RegionResult;
+  signature?: RegionResult;
+}
+
+export async function aiLocateRegions(
+  page: PageRender,
+): Promise<AiRegionVerdicts | null> {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) return null;
 
@@ -31,7 +39,7 @@ export async function aiLocateSignature(
     const client = new Anthropic({ apiKey });
     const response = await client.messages.create({
       model: AI_MODEL,
-      max_tokens: 256,
+      max_tokens: 500,
       messages: [
         {
           role: "user",
@@ -41,22 +49,10 @@ export async function aiLocateSignature(
               source: {
                 type: "base64",
                 media_type: "image/png",
-                data: lastPage.pngBuffer.toString("base64"),
+                data: page.pngBuffer.toString("base64"),
               },
             },
-            {
-              type: "text",
-              text: [
-                "This image is the last page of a document.",
-                "Locate the handwritten or italic-rendered signature if one is present anywhere on the page.",
-                "Signatures can appear at the bottom (most common), in initialed margins, or near a printed name elsewhere on the page.",
-                "Respond with strict JSON only, no prose, no code fences:",
-                '{ "present": boolean, "x": number, "y": number, "w": number, "h": number, "note": string }',
-                "Coordinates are normalized to [0,1] relative to the image dimensions. (0,0) is top-left.",
-                "x/y are the TOP-LEFT of the bbox; w/h are width and height.",
-                'If no signature is present, return { "present": false, "x": 0, "y": 0, "w": 0, "h": 0, "note": "..." }.',
-              ].join(" "),
-            },
+            { type: "text", text: buildPrompt() },
           ],
         },
       ],
@@ -64,46 +60,19 @@ export async function aiLocateSignature(
 
     const textBlock = response.content.find((b) => b.type === "text");
     if (!textBlock || textBlock.type !== "text") return null;
-    const parsed = parseVisionResponse(textBlock.text);
-    if (!parsed || !parsed.present) {
-      return {
-        kind: "signature",
-        detected: false,
-        imageDataUrl: null,
-        confidence: 0.7,
-        page: null,
-        rationale: `Claude (Haiku) saw no signature on the last page. ${
-          parsed?.note ?? ""
-        }`.trim(),
-        width: null,
-        height: null,
-      };
-    }
-
-    // Re-project normalized coords → full-page pixel coords.
-    const boxX = Math.max(0, parsed.x * lastPage.width);
-    const boxY = Math.max(0, parsed.y * lastPage.height);
-    const boxW = Math.min(lastPage.width - boxX, parsed.w * lastPage.width);
-    const boxH = Math.min(lastPage.height - boxY, parsed.h * lastPage.height);
-
-    if (boxW < 10 || boxH < 10) return null;
-
-    const { buffer, width, height } = await cropPng(
-      lastPage.pngBuffer,
-      { x: boxX, y: boxY, width: boxW, height: boxH },
-      lastPage.width,
-      lastPage.height,
-    );
+    const parsed = parseAllRegionsResponse(textBlock.text);
+    if (!parsed) return null;
 
     return {
-      kind: "signature",
-      detected: true,
-      imageDataUrl: bufferToDataUrl(buffer),
-      confidence: 0.82,
-      page: lastPage.pageIndex + 1,
-      rationale: `AI vision (Claude Haiku) located the signature. ${parsed.note ?? ""}`.trim(),
-      width,
-      height,
+      letterhead: parsed.letterhead
+        ? await buildAiRegion(page, parsed.letterhead, "letterhead")
+        : undefined,
+      footer: parsed.footer
+        ? await buildAiRegion(page, parsed.footer, "footer")
+        : undefined,
+      signature: parsed.signature
+        ? await buildAiRegion(page, parsed.signature, "signature")
+        : undefined,
     };
   } catch (err) {
     // eslint-disable-next-line no-console
@@ -112,6 +81,94 @@ export async function aiLocateSignature(
       err instanceof Error ? err.message : err,
     );
     return null;
+  }
+}
+
+function buildPrompt(): string {
+  return [
+    "This image is one page of a document.",
+    "Locate each of the three regions below if present on this page.",
+    "1. letterhead — branding/title block at the top (logo, company name, address, contact info).",
+    "2. footer — small text at the bottom (page numbers, copyright, contact info, disclaimers).",
+    "3. signature — handwritten or italic-rendered signature line. Can appear anywhere on the page.",
+    "",
+    "Respond with STRICT JSON ONLY (no prose, no code fences):",
+    JSON.stringify({
+      letterhead: { present: false, x: 0, y: 0, w: 0, h: 0, note: "" },
+      footer: { present: false, x: 0, y: 0, w: 0, h: 0, note: "" },
+      signature: { present: false, x: 0, y: 0, w: 0, h: 0, note: "" },
+    }),
+    "Coordinates are normalized to [0,1] relative to the image dimensions.",
+    "(0,0) is TOP-LEFT. x/y are the TOP-LEFT corner of the bbox; w/h are width and height.",
+    "If a region is not present, set present:false with all other fields zeroed.",
+  ].join("\n");
+}
+
+async function buildAiRegion(
+  page: PageRender,
+  v: VisionResponse,
+  kind: RegionKind,
+): Promise<RegionResult> {
+  if (!v.present) {
+    return {
+      kind,
+      detected: false,
+      imageDataUrl: null,
+      confidence: 0.7, // confident absence per vision
+      page: null,
+      rationale: `Claude (Haiku) saw no ${kind}.${v.note ? ` ${v.note}` : ""}`,
+      width: null,
+      height: null,
+    };
+  }
+  const boxX = Math.max(0, v.x * page.width);
+  const boxY = Math.max(0, v.y * page.height);
+  const boxW = Math.min(page.width - boxX, v.w * page.width);
+  const boxH = Math.min(page.height - boxY, v.h * page.height);
+
+  if (boxW < 10 || boxH < 10) {
+    return {
+      kind,
+      detected: false,
+      imageDataUrl: null,
+      confidence: 0.5,
+      page: null,
+      rationale: `Claude returned an unusable ${kind} bbox.`,
+      width: null,
+      height: null,
+    };
+  }
+
+  try {
+    const { buffer, width, height } = await cropPng(
+      page.pngBuffer,
+      { x: boxX, y: boxY, width: boxW, height: boxH },
+      page.width,
+      page.height,
+    );
+    return {
+      kind,
+      detected: true,
+      imageDataUrl: bufferToDataUrl(buffer),
+      confidence: 0.82,
+      page: page.pageIndex + 1,
+      rationale: `AI vision (Claude Haiku) located the ${kind}.${v.note ? ` ${v.note}` : ""}`,
+      width,
+      height,
+    };
+  } catch (err) {
+    return {
+      kind,
+      detected: false,
+      imageDataUrl: null,
+      confidence: 0,
+      page: null,
+      rationale: `AI ${kind} crop failed: ${
+        err instanceof Error ? err.message : String(err)
+      }`,
+      width: null,
+      height: null,
+    };
   }
 }
 
@@ -125,9 +182,39 @@ interface VisionResponse {
 }
 
 /**
- * Coerce Claude's vision JSON response into our typed shape.
- * Defers raw extraction to `extractJsonObject` (which tolerates code fences,
- * preambles, etc.) and then validates each field.
+ * Coerce Claude's three-region JSON response into typed verdicts. Each key
+ * is optional — if Claude omits one, we just leave that region untouched.
+ */
+export function parseAllRegionsResponse(text: string): {
+  letterhead?: VisionResponse;
+  footer?: VisionResponse;
+  signature?: VisionResponse;
+} | null {
+  const obj = extractJsonObject<Record<string, unknown>>(text);
+  if (!obj || typeof obj !== "object") return null;
+  return {
+    letterhead: parseRegion(obj.letterhead),
+    footer: parseRegion(obj.footer),
+    signature: parseRegion(obj.signature),
+  };
+}
+
+function parseRegion(raw: unknown): VisionResponse | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const r = raw as Record<string, unknown>;
+  return {
+    present: Boolean(r.present),
+    x: Number(r.x) || 0,
+    y: Number(r.y) || 0,
+    w: Number(r.w) || 0,
+    h: Number(r.h) || 0,
+    note: typeof r.note === "string" ? r.note : undefined,
+  };
+}
+
+/**
+ * Kept for backwards compatibility with the older signature-only callers
+ * and tests. New code should use `parseAllRegionsResponse`.
  */
 export function parseVisionResponse(text: string): VisionResponse | null {
   const obj = extractJsonObject<Record<string, unknown>>(text);
